@@ -1,0 +1,7 @@
+<root>
+ <spec>TouchpointTowers_spec.mcrl2</spec>
+ <properties/>
+ <jittyc>false</jittyc>
+ <linearisation_method>regular</linearisation_method>
+ <enumeration_limit>0</enumeration_limit>
+</root>
