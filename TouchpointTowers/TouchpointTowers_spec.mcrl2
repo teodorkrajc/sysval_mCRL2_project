@@ -1,4 +1,4 @@
-% Touchpoint Towers. See docs/design.md for the design.
+% Touchpoint Towers
 
 sort Car = struct A | B;
      Loc = struct I | fl(wing: Car, lvl: Nat);   % lvl is 1, 2, 4 or 5; I is level 3
