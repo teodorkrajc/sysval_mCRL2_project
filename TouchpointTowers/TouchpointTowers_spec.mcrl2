@@ -1,0 +1,93 @@
+% Touchpoint Towers. See docs/design.md for the design.
+
+sort Car = struct A | B;
+     Loc = struct I | fl(wing: Car, lvl: Nat);   % lvl is 1, 2, 4 or 5; I is level 3
+     LegState = struct blocked | waiting | active;
+
+     % (ro, rd) is the original request, (src, dst) is the part this car does
+     Leg = struct leg(ro: Loc, rd: Loc, src: Loc, dst: Loc, st: LegState);
+
+     % kept sorted and without duplicates by ins; a list because you can't recurse over an FSet
+     Pool = List(Leg);
+
+     Dir = struct up | down;
+     Owner = struct free | heldBy(holder: Car);
+
+map MAXPOOL: Nat;
+    ILEVEL: Nat;
+    TOP: Nat;
+eqn MAXPOOL = 5;
+    ILEVEL = 3;
+    TOP = 5;
+
+map validLoc: Loc -> Bool;
+    level: Loc -> Nat;
+    carOf: Loc -> Car;
+    isCross: Loc # Loc -> Bool;
+
+var w: Car; n: Nat; x, y: Loc;
+eqn validLoc(I) = true;
+    validLoc(fl(w, n)) = 1 <= n && n <= TOP && n != ILEVEL;
+    level(I) = ILEVEL;
+    level(fl(w, n)) = n;
+    carOf(fl(w, n)) = w;
+    isCross(x, y) = x != I && y != I && carOf(x) != carOf(y);
+
+map ins: Leg # Pool -> Pool;
+    carOfLeg: Leg -> Car;
+    newLegs: Loc # Loc -> Pool;
+    addLegs: Pool # Pool -> Pool;
+    stopsOf: Car # Pool -> FSet(Nat);
+
+var l, k: Leg; p, q: Pool; e: Car; x, y: Loc;
+eqn ins(l, []) = [l];
+    ins(l, k |> p) = if(l == k, k |> p, if(l < k, l |> k |> p, k |> ins(l, p)));
+
+    carOfLeg(l) = if(src(l) == I, carOf(dst(l)), carOf(src(l)));
+
+    newLegs(x, y) = if(isCross(x, y),
+                       [leg(x, y, x, I, waiting), leg(x, y, I, y, blocked)],
+                       [leg(x, y, x, y, waiting)]);
+
+    addLegs([], q) = q;
+    addLegs(l |> p, q) = addLegs(p, ins(l, q));
+
+    % a car stops where someone waits for it or where someone in it wants to get off
+    stopsOf(e, []) = {};
+    stopsOf(e, l |> p) =
+        if(carOfLeg(l) == e && st(l) == waiting, {level(src(l))},
+        if(carOfLeg(l) == e && st(l) == active, {level(dst(l))}, {}))
+        + stopsOf(e, p);
+
+% _d, _c and _m are the dispatcher, car and intersection manager halves of a sync
+act request: Loc # Loc;
+    stops_d, stops_c, stops: Car # FSet(Nat);
+    visit_c, visit_d, visit: Car # Nat;
+    enterI_c, enterI_m, enterI: Car;
+    leaveI_c, leaveI_m, leaveI: Car;
+    move: Car # Nat # Nat;
+    open, close: Car;
+    pickup, dropoff: Car # Loc # Loc;
+    done: Loc # Loc;
+    emergency_c, emergency, reset_c, reset;
+
+proc Dispatcher(pool: Pool) = delta;
+
+proc Elevator(e: Car, pos: Nat, dir: Dir, doorsOpen: Bool, S: FSet(Nat),
+              hasI: Bool, halted: Bool) = delta;
+
+proc IManager(owner: Owner) = delta;
+
+init allow({request, stops, visit, enterI, leaveI, move, open, close,
+            pickup, dropoff, done, emergency, reset},
+     comm({stops_d | stops_c -> stops,
+           visit_c | visit_d -> visit,
+           enterI_c | enterI_m -> enterI,
+           leaveI_c | leaveI_m -> leaveI,
+           emergency_c | emergency_c -> emergency,
+           reset_c | reset_c -> reset},
+       Dispatcher([])
+       || Elevator(A, 1, up, false, {}, false, false)
+       || Elevator(B, 1, up, false, {}, false, false)
+       || IManager(free)
+     ));

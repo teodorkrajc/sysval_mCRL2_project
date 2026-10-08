@@ -22,7 +22,7 @@ The system: two elevators in two wings (A left, B right), levels 1–5 each, who
 Create missing pieces in this layout; don't invent a different one.
 
 ```
-model/touchpoint.mcrl2     # the specification (one file)
+TouchpointTowers/TouchpointTowers_spec.mcrl2   # the specification (one file; mCRL2 IDE project in the same folder)
 properties/<ID>_<name>.mcf # one formula per requirement, e.g. S1_mutex.mcf
 properties/sanity/*.mcf    # reachability/vacuity checks (see §7)
 scripts/verify.sh          # full pipeline: linearise, state space, all properties
@@ -39,14 +39,17 @@ out/                       # generated files (gitignored)
 
 ```
 sort Car      = struct A | B;
-     Loc      = struct I | fl(w: Car, n: Nat);      % n ∈ {1, 2, 4, 5}; I is level 3
+     Loc      = struct I | fl(wing: Car, lvl: Nat);  % lvl ∈ {1, 2, 4, 5}; I is level 3
      LegState = struct blocked | waiting | active;
+     Leg      = struct leg(ro: Loc, rd: Loc, src: Loc, dst: Loc, st: LegState);
+     Pool     = List(Leg);                           % sorted, duplicate-free
 ```
 
 - A car's position is a level `Nat` in 1–5, where 3 = I. Write helper maps (`level: Loc -> Nat`, `carOf: Loc -> Car` for non-I locations) instead of repeating case logic.
-- A leg must remember its **original request** (for `done(o, d)` and for unblocking leg 2). Suggested shape: `leg(ro: Loc, rd: Loc, o: Loc, d: Loc, st: LegState)`.
-- Use `FSet`, not `Set` or `List`, for the pool and stop sets.
-- All bounds are named constants in one place: `map MAXPOOL: Nat; eqn MAXPOOL = 2;`. Start small (2) and raise only after a property passes.
+- A leg must remember its **original request** (`ro`, `rd`) for `done(o, d)` and for unblocking leg 2.
+- Struct field names become global functions: don't reuse them as variable names (`w`, `n`, `o`, `d` are used as variables, so the fields are `wing`, `lvl`, `src`, `dst`).
+- **Pool = sorted, duplicate-free `List(Leg)`**, maintained only through `ins`. Not `FSet`: mCRL2 can't pattern-match on `FSet`, so there's no way to write the recursive functions the pool needs (verified 2026-10-08 on 202607.0). Sorting keeps it canonical: the same pool is always the same state. Stop sets stay `FSet(Nat)`, since they only need `in`.
+- All bounds are named constants in one place (`MAXPOOL`, `ILEVEL`, `TOP`). `MAXPOOL = 5` (the design bound). If state-space generation is too slow, lower it and report that.
 - Never use unbounded data that grows with the run (queues, counters); it makes the state space infinite.
 
 **Behaviour**
@@ -64,7 +67,7 @@ comm stops_d | stops_c -> stops,  visit_c | visit_d -> visit,
      enterI_c | enterI_m -> enterI, leaveI_c | leaveI_m -> leaveI;
 ```
 
-`emergency` and `reset` are three-party (environment + both cars). Check that the `comm` spelling you use is accepted by the installed toolset version.
+The environment is not a separate process: `request`, `emergency` and `reset` are always offered (open system). `emergency` and `reset` synchronise both cars: `emergency_c | emergency_c -> emergency`.
 
 Only actions from the action table in `docs/design.md` may stay visible after `allow`. Requirements are written over exactly those names. Don't hide actions that a requirement mentions.
 
@@ -118,12 +121,12 @@ forall o, d: Loc . [true* . request(o, d)]
 2. **Every property gets a sanity check** in `properties/sanity/`: a reachability formula showing the scenario it talks about can actually happen (e.g. `<true* . pickup(B, I, fl(B, 5))> true` for S6). A safety formula over unreachable actions passes trivially.
 3. Safety alone is meaningless (a model that never moves satisfies it). Keep L1–L4 green alongside it.
 4. After every model change, rerun the full pipeline and update `docs/results.md`: state count, transition count, and each property's result per configuration.
-5. Keep state spaces small: 5 levels per car, `MAXPOOL` ≤ 3. If generation takes more than a few minutes, reduce first and report it; don't add tricks silently.
+5. Keep state spaces small: 5 levels per car, `MAXPOOL` ≤ 5. If generation takes more than a few minutes, reduce first and report it; don't add tricks silently.
 6. Comment the model per component and per non-obvious guard. The report must let an engineer rebuild the controller exactly from it.
 
 ## 8. Plan and status
 
-Status: design done (`docs/design.md`), model not yet written.
+Status: design done (`docs/design.md`). Model draft 1: data types, helpers, actions and component skeletons; process bodies not yet written.
 
 1. **Milestone 1:** same-wing trips only, mutex on I, doors, emergency. Requirements S1–S5, S7–S10, L1–L4 green.
 2. **Milestone 2:** cross-wing trips with blocked/waiting/active legs. Add S6 and recheck everything. Target: running and verified by **16 Oct**.
@@ -131,3 +134,9 @@ Status: design done (`docs/design.md`), model not yet written.
 4. **Further extensions, if time allows:** crossing fairness; emergency while a car holds I; approach-zone reservation.
 
 Open design decisions (see `docs/design.md`): opposite-direction pickups, idle position, when a car re-reads its stop set, P1 formulation, and whether the dispatcher and intersection manager need to communicate.
+
+### Known pitfalls (resolve while writing the processes)
+
+- **Polling livelock.** If a car can always re-read `stops(e, S)`, including an empty or unchanged S, there's an infinite path of only `stops` actions. The "inevitably" in L2 and L4 then fails. An idle car must block until there is work, or reads must be tied to progress. This is linked to the "when does a car re-read its stop set" decision.
+- **Emergency vs. L2.** If `request` can happen during an emergency, the L2 pattern (which excludes `reset`) leaves a state where nothing but `reset` can happen: `done` never comes and the `<…> true` conjunct fails. Decide whether requests are refused during an emergency, or whether L2 is stated for paths outside an emergency. Write the choice down in the report.
+- **Merging identical requests.** `ins` merges only identical legs, including their state. A repeated cross-wing request while the first is under way adds a new waiting leg 1 but merges with the existing blocked leg 2. The second passenger can then be stranded at I. Decide what "identical pairs merge" means before writing the dispatcher's `visit` handling.

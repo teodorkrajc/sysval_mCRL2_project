@@ -21,7 +21,7 @@ Two elevators, each confined to its own wing, share exactly one floor: the Touch
 
 - Discrete levels; no time. A car jumps directly to its next stop in one atomic move.
 - Requests are (origin, destination) pairs; identical pairs merge.
-- The pending pool is bounded by a constant (e.g. 5); car and floor capacity are unbounded.
+- The pending pool is bounded by a constant (5 legs); car and floor capacity are unbounded.
 - The number of levels is constant.
 
 **Challenge:**

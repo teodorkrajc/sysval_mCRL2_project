@@ -1,0 +1,6 @@
+out/
+*.lps
+*.lts
+*.aut
+*.pbes
+*.trc
