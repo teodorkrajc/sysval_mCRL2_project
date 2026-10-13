@@ -4,3 +4,4 @@ out/
 *.aut
 *.pbes
 *.trc
+.claude/
