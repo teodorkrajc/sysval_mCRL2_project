@@ -35,9 +35,25 @@ var r, q: Req;
 	n: Nat;
 
 eqn owner(r) = if(src(r) == I, carOf(dst(r)), carOf(src(r))); % src may be I; then dst decides
-	ins(r, []) = [r]; % Insert r into empty list
-	ins(r, q |> p) = if(r == q, q |> p, if(r < q, r |> q |> p, q |> ins(r,p))); % Correct insertion position
-	
+	ins(r, []) = [r]; % Insert r into empty pool
+	ins(r, q |> p) = if(r == q, q |> p, if(r < q, r |> q |> p, q |> ins(r,p))); % No duplication, inorder insertion
+	stopsOf(e, []) = {}; % Empty pool case
+	% Pick only stops e is an owner of; e's waiting requests give src level, active give dst level
+	stopsOf(e, q |> p) =
+		if(owner(q) == e && st(q) == waiting, {level(src(q))},
+		if(owner(q) == e && st(q) == active, {level(dst(q))},
+		{}))
+		+ stopsOf(e, p); 
+	afterVisit(e, n, []) = []; 
+	% Update pool after a visit
+	afterVisit(e, n, q |> p) =
+		if(owner(q) == e && st(q) == waiting && level(src(q)) == n,
+			ins(req(src(q), dst(q), active), afterVisit(e, n, p)), % board
+		if (owner(q) == e && st(q) == active && level(dst(q)) == n,
+			afterVisit(e, n, p), % get off, q is removed
+			ins(q, afterVisit(e, n, p)))); % q untouched and kept
+
+% Model
 
 
 
