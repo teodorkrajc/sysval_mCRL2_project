@@ -1,0 +1,3 @@
+forall e,e2: Car .
+  val(e != e2) =>
+    [true* . enterI(e) . (!leaveI(e))* . enterI(e2)] false
