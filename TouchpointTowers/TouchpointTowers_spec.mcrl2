@@ -12,9 +12,12 @@ map level: Loc -> Nat; % Get the level value from Loc
 	validLoc: Loc -> Bool; % Verify validity of Loc struct
 	carOf: Loc -> Car; % Get the car value from Loc
 	toLoc: Car # Nat -> Loc; % Convert a (Car, Nat) tuple to a Loc
+	sameWing: Loc # Loc -> Bool; % Same wing check, to validate if a Car can perform a trip
+	MAXPOOL: Nat; % Max number of requests in the pool 
 
 var w: Car;
 	n: Nat;
+	x, y: Loc;
 
 eqn level(I) = 3;
 	level(fl(w,n)) = n;
@@ -22,6 +25,8 @@ eqn level(I) = 3;
 	validLoc(fl(w,n)) =  n>=1 && n<=5 && n!=3;
 	carOf(fl(w,n)) = w;
 	toLoc(w, n) = if(n == 3, I, fl(w, n));
+	sameWing(x, y) = x == I || y == I || carOf(x) == carOf(y);
+	MAXPOOL = 2; % hardcoded
 
 % Dispatcher Functions
 map owner: Req -> Car; % Gives owner (car) of a request
@@ -53,8 +58,72 @@ eqn owner(r) = if(src(r) == I, carOf(dst(r)), carOf(src(r))); % src may be I; th
 			afterVisit(e, n, p), % get off, q is removed
 			ins(q, afterVisit(e, n, p)))); % q untouched and kept
 
-% Model
+% Elevator Functions (LOOK)
+sort Dir = struct up | down;
 
+map nextUp: Nat # FSet(Nat) -> Nat; % Nearest stop above level n, 0 if none
+	nextDown: Nat # FSet(Nat) -> Nat; % Nearest stop below level n, 0 if none
+	target: Nat # Dir # FSet(Nat) -> Nat; % Level to serve next
+	newDir: Nat # Dir # FSet(Nat) -> Dir; % Direction after choosing the target
 
+var n: Nat;
+	d: Dir;
+	S: FSet(Nat);
 
-init delta;
+% Conditional equations (c -> lhs = rhs), not if(): with an unknown n, an if() would unfold forever
+eqn n >= 5 -> nextUp(n, S) = 0;
+	n < 5 -> nextUp(n, S) = if(n + 1 in S, n + 1, nextUp(n + 1, S));
+	n <= 1 -> nextDown(n, S) = 0;
+	n > 1 -> nextDown(n, S) = if(Int2Nat(n - 1) in S, Int2Nat(n - 1), nextDown(Int2Nat(n - 1), S));
+	% Serve the current level first; else keep going in d; reverse only if nothing lies ahead
+	target(n, d, S) =
+		if(n in S, n,
+		if(d == up, if(nextUp(n, S) != 0, nextUp(n, S), nextDown(n, S)),
+		            if(nextDown(n, S) != 0, nextDown(n, S), nextUp(n, S))));
+	newDir(n, d, S) =
+		if(n in S, d,
+		if(d == up, if(nextUp(n, S) != 0, up, down),
+		            if(nextDown(n, S) != 0, down, up)));
+
+% Actions
+act request: Loc # Loc; % a passenger at o wants to go to d
+	% require different names to perform handshake on action
+	stops_d, stops_c, stops: Car # FSet(Nat); % car reads its stop set
+	visit_d, visit_c, visit: Car # Nat; % car serves a level with doors open
+	move: Car # Nat # Nat; % car jumps from one level to another
+	open, close: Car; % open / close doors
+
+% Processes
+
+% Dispatcher
+proc Dispatcher(pool: Pool) =
+	% add an incoming request
+	sum o, d: Loc . (validLoc(o) && validLoc(d) && o != d
+		&& #pool < MAXPOOL % if pool free
+		&& sameWing(o, d) % trip possible
+		&& owner(req(o, d, waiting)) == A) % step 1 only: car B does not exist yet
+		-> request(o, d) . Dispatcher(ins(req(o, d, waiting), pool))
+	% expose stops to a Car (offer handshake)
+	+ sum e: Car . stops_d(e, stopsOf(e, pool)) . Dispatcher(pool)
+	% update pool after a Car visits a stop
+	+ sum e: Car, n: Nat . visit_d(e, n) . Dispatcher(afterVisit(e, n, pool));
+
+% Elevator
+proc Elevator(e: Car, pos: Nat, dir: Dir) =
+	sum S: FSet(Nat) . (S != {}) -> stops_c(e, S) .
+	Go(e, pos, newDir(pos, dir, S), target(pos, dir, S));
+
+% Move to target floor
+proc Go(e: Car, pos: Nat, dir: Dir, t: Nat) =
+	(t != pos) -> move(e, pos, t) . Serve(e, t, dir)
+	<> Serve(e, pos, dir);
+
+% Serve a floor
+proc Serve(e: Car, pos: Nat, dir: Dir) =
+	open(e) . visit_c(e, pos) . close(e) . Elevator(e, pos, dir);
+
+% Compose with allow
+init allow({request, stops, visit, move, open, close},
+	comm({stops_d | stops_c -> stops,
+	      visit_d | visit_c -> visit},
+		Dispatcher([]) || Elevator(A, 1, up)));
