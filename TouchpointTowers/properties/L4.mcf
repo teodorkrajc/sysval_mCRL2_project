@@ -1,0 +1,11 @@
+forall e: Car .
+  [true* . enterI(e)]
+    mu X .
+    (
+      [!(leaveI(e) ||
+         (exists o,d: Loc . request(o,d)) ||
+         emergency || reset)] X
+      &&
+      <!( (exists o,d: Loc . request(o,d)) ||
+           emergency || reset)> true
+    )

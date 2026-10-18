@@ -1,0 +1,31 @@
+nu M(normal: Bool = true) .
+(
+  [emergency] M(false)
+  &&
+  [reset] M(true)
+  &&
+  (forall o,d: Loc .
+    [request(o,d)]
+      (
+        M(normal)
+        &&
+        (
+          val(!normal)
+          ||
+          mu X .
+          (
+            [!(done(o,d) ||
+               (exists x,y: Loc . request(x,y)) ||
+               emergency || reset)] X
+            &&
+            <!( (exists x,y: Loc . request(x,y)) ||
+                 emergency || reset)> true
+          )
+        )
+      )
+  )
+  &&
+  [!(emergency || reset ||
+     (exists x,y: Loc . request(x,y)))]
+    M(normal)
+)

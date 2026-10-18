@@ -11,6 +11,10 @@
   <property>S8</property>
   <property>S9</property>
   <property>S10</property>
+  <property>L1</property>
+  <property>L2</property>
+  <property>L3</property>
+  <property>L4</property>
  </properties>
  <jittyc>false</jittyc>
  <linearisation_method>regular</linearisation_method>
