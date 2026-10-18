@@ -1,0 +1,13 @@
+
+forall o,d: Loc .
+  nu X(accepted: Nat = 0, finished: Nat = 0) .
+  (
+    [request(o,d)] X(accepted + 1, finished)
+    &&
+    [done(o,d)]
+      (val(finished < accepted) &&
+       X(accepted, finished + 1))
+    &&
+    [!(request(o,d) || done(o,d))]
+      X(accepted, finished)
+  )

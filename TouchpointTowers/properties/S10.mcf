@@ -1,0 +1,15 @@
+forall e: Car .
+  nu X(pos: Nat = 1, S: FSet(Nat) = {}) .
+  (
+    (forall T: FSet(Nat) .
+      [stops(e,T)] X(pos,T))
+    &&
+    (forall f1,f2: Nat .
+      [move(e,f1,f2)] X(f2,S))
+    &&
+    [!((exists T: FSet(Nat) . stops(e,T)) ||
+       (exists f1,f2: Nat . move(e,f1,f2)))]
+      X(pos,S)
+    &&
+    [open(e)] val(pos in S)
+  )

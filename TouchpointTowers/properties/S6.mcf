@@ -1,0 +1,5 @@
+forall i: ReqId, o,d: Loc .
+  val(crossWing(o,d)) =>
+    [true* . request(i,o,d) .
+      (!dropoff(i,carOf(o),o,I))* .
+       pickup(i,carOf(d),I,d)] false

@@ -1,0 +1,15 @@
+forall e: Car .
+forall n: Nat .
+  val(n >= 1 && n <= 5) =>
+  (
+    [(!(exists S: FSet(Nat) . stops(e,S)))* .
+      visit(e,n)] false
+
+    &&
+
+    [true* .
+      (exists S: FSet(Nat) .
+        stops(e,S) && val(!(n in S))) .
+      (!(exists T: FSet(Nat) . stops(e,T)))* .
+      visit(e,n)] false
+  )

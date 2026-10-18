@@ -1,0 +1,11 @@
+forall e: Car .
+forall n: Nat .
+  val(n >= 1 && n <= 5) =>
+    [true* .
+      (exists S: FSet(Nat) .
+        stops(e,S) && val(n in S)) .
+      (!(exists T: FSet(Nat) . stops(e,T)))* .
+      (exists f1,f2: Nat .
+        move(e,f1,f2) &&
+        val((f1 < n && n < f2) ||
+            (f2 < n && n < f1)))] false

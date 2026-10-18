@@ -5,6 +5,12 @@
   <property>S2</property>
   <property>S3</property>
   <property>S4</property>
+  <property>S5</property>
+  <property>S6</property>
+  <property>S7</property>
+  <property>S8</property>
+  <property>S9</property>
+  <property>S10</property>
  </properties>
  <jittyc>false</jittyc>
  <linearisation_method>regular</linearisation_method>

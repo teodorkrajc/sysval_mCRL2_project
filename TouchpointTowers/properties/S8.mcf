@@ -1,0 +1,4 @@
+
+forall e: Car .
+  [true* . emergency . (!reset)* .
+    (exists f1,f2: Nat . move(e,f1,f2))] false
