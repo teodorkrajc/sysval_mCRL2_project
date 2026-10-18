@@ -2,6 +2,9 @@
  <spec>TouchpointTowers_spec.mcrl2</spec>
  <properties>
   <property>S1</property>
+  <property>S2</property>
+  <property>S3</property>
+  <property>S4</property>
  </properties>
  <jittyc>false</jittyc>
  <linearisation_method>regular</linearisation_method>

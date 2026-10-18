@@ -1,0 +1,8 @@
+forall e: Car .
+  (
+    [(!open(e))* .
+      (exists n: Nat . visit(e,n))] false
+    &&
+    [true* . close(e) . (!open(e))* .
+      (exists n: Nat . visit(e,n))] false
+  )

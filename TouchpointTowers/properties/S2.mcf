@@ -1,0 +1,10 @@
+forall e: Car .
+forall f1,f2: Nat .
+  val(((f1 <= 3) && (3 <= f2)) ||
+      ((f2 <= 3) && (3 <= f1))) =>
+  (
+    [(!enterI(e))* . move(e,f1,f2)] false
+    &&
+    [true* . leaveI(e) . (!enterI(e))* .
+      move(e,f1,f2)] false
+  )
