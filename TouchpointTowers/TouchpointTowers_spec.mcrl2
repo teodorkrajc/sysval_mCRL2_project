@@ -2,10 +2,11 @@
 
 % Data Structures
 sort Car = struct A | B; % Two cars, enumerated
-     Loc = struct I | fl(wing: Car, lvl: Nat); % lvl is 1, 2, 4 or 5; I is level 3
-     State = struct waiting | active; % status of request
-     Req = struct req(src: Loc, dst: Loc, st: State); % Request shape: (orig, dest, status)
-     Pool = List(Req); % kept sorted and without duplicates by ins
+	Loc = struct I | fl(wing: Car, lvl: Nat); % lvl is 1, 2, 4 or 5; I is level 3
+	State = struct waiting | active; % status of request
+    Req = struct req(src: Loc, dst: Loc, st: State); % Request shape: (orig, dest, status)
+    Pool = List(Req); % kept sorted and without duplicates by ins
+	Owner = struct free | heldBy(holder: Car) % IM mutex state
 
 % Helper Functions
 map level: Loc -> Nat; % Get the level value from Loc
@@ -59,27 +60,31 @@ eqn owner(r) = if(src(r) == I, carOf(dst(r)), carOf(src(r))); % src may be I; th
 			ins(q, afterVisit(e, n, p)))); % q untouched and kept
 
 % Elevator Functions (LOOK)
-sort Dir = struct up | down;
+sort Dir = struct up | down; % current direction of movement
 
-map nextUp: Nat # FSet(Nat) -> Nat; % Nearest stop above level n, 0 if none
-	nextDown: Nat # FSet(Nat) -> Nat; % Nearest stop below level n, 0 if none
-	target: Nat # Dir # FSet(Nat) -> Nat; % Level to serve next
-	newDir: Nat # Dir # FSet(Nat) -> Dir; % Direction after choosing the target
+map nextUp: Nat # FSet(Nat) -> Nat; % nearest stop above level n; 0 if none
+	nextDown: Nat # FSet(Nat) -> Nat; % nearest stop below level n; 0 if none
+	target: Nat # Dir # FSet(Nat) -> Nat; % level to serve next
+	newDir: Nat # Dir # FSet(Nat) -> Dir; % direction after choosing target
 
 var n: Nat;
 	d: Dir;
 	S: FSet(Nat);
 
-% Conditional equations (c -> lhs = rhs), not if(): with an unknown n, an if() would unfold forever
+% conditional equations (c -> lhs = rhs)
+% mention in report why -> an if() would unfold forever while n is still unknown
 eqn n >= 5 -> nextUp(n, S) = 0;
 	n < 5 -> nextUp(n, S) = if(n + 1 in S, n + 1, nextUp(n + 1, S));
 	n <= 1 -> nextDown(n, S) = 0;
-	n > 1 -> nextDown(n, S) = if(Int2Nat(n - 1) in S, Int2Nat(n - 1), nextDown(Int2Nat(n - 1), S));
-	% Serve the current level first; else keep going in d; reverse only if nothing lies ahead
+	% result of n - 1 is an Int, need to turn it back to Nat; safe since n > 1
+	n > 1 -> nextDown(n, S) = if(Int2Nat(n - 1) in S, Int2Nat(n - 1), nextDown(Int2Nat(n - 1), S)); 
+
+	% serve current level first; else keep going in d; reverse if no stops ahead
 	target(n, d, S) =
 		if(n in S, n,
 		if(d == up, if(nextUp(n, S) != 0, nextUp(n, S), nextDown(n, S)),
 		            if(nextDown(n, S) != 0, nextDown(n, S), nextUp(n, S))));
+	% change direction if no more stops on current direction
 	newDir(n, d, S) =
 		if(n in S, d,
 		if(d == up, if(nextUp(n, S) != 0, up, down),
@@ -92,6 +97,8 @@ act request: Loc # Loc; % a passenger at o wants to go to d
 	visit_d, visit_c, visit: Car # Nat; % car serves a level with doors open
 	move: Car # Nat # Nat; % car jumps from one level to another
 	open, close: Car; % open / close doors
+	enterI_c, enterI_im, enterI: Car; % enter the intersection
+	leaveI_c, leaveI_im, leaveI: Car; % leave the intersection
 
 % Processes
 
@@ -101,7 +108,6 @@ proc Dispatcher(pool: Pool) =
 	sum o, d: Loc . (validLoc(o) && validLoc(d) && o != d
 		&& #pool < MAXPOOL % if pool free
 		&& sameWing(o, d) % trip possible
-		&& owner(req(o, d, waiting)) == A) % step 1 only: car B does not exist yet
 		-> request(o, d) . Dispatcher(ins(req(o, d, waiting), pool))
 	% expose stops to a Car (offer handshake)
 	+ sum e: Car . stops_d(e, stopsOf(e, pool)) . Dispatcher(pool)
@@ -110,16 +116,21 @@ proc Dispatcher(pool: Pool) =
 
 % Elevator
 proc Elevator(e: Car, pos: Nat, dir: Dir) =
+	% receive stop sets; no busy waiting while set is empty
 	sum S: FSet(Nat) . (S != {}) -> stops_c(e, S) .
+	% pick next target and direction (LOOK)
 	Go(e, pos, newDir(pos, dir, S), target(pos, dir, S));
 
 % Move to target floor
 proc Go(e: Car, pos: Nat, dir: Dir, t: Nat) =
+	% if not on target floor, first move, then serve
 	(t != pos) -> move(e, pos, t) . Serve(e, t, dir)
+	% otherwise, server current (target) floor
 	<> Serve(e, pos, dir);
 
 % Serve a floor
 proc Serve(e: Car, pos: Nat, dir: Dir) =
+	% open doors, visit (offer handshake), close doors, restart loop
 	open(e) . visit_c(e, pos) . close(e) . Elevator(e, pos, dir);
 
 % Compose with allow

@@ -1,0 +1,390 @@
+
+\section{System Description}
+\label{sec:system-description}
+
+\subsection{Purpose and Physical Layout}
+
+Touchpoint Towers is a conceptual building consisting of two wings inspired by Michelangelo's \textit{The Creation of Adam}. The wings extend towards one another and meet at a single shared location, which is from now on referred to as \emph{Touchpoint I}. Each wing contains five levels and is served by a dedicated elevator, denoted by \(A\) and \(B\). Level 3 corresponds to Touchpoint I, whereas levels 1, 2, 4, and 5 belong exclusively to their respective wings.
+
+Touchpoint I serves as both the intersection of the two elevator tracks and the only passenger interchange between the wings. Both elevators must therefore coordinate access to this location, including when passing through it without stopping. Journeys within a wing require one elevator; journeys between wings require a transfer at I. For example, \(1_A\rightarrow 5_B\) is divided into \(1_A\rightarrow I\) on A and \(I\rightarrow 5_B\) on B, in that order.
+
+\subsection{System Operation}
+
+The system employs destination dispatch: passengers specify their destination at a terminal, while their origin is determined by the terminal's location. A central dispatcher maintains outstanding requests, decomposes cross-wing journeys into legs, and prioritizes requests according to a first-in, first-out (FIFO) policy. Later requests may be grouped with a selected request when their journeys are compatible.
+
+The controller has four parallel components: the dispatcher, elevators A and B, and the intersection manager. The dispatcher assigns work, the elevators perform movements and passenger service, and the intersection manager coordinates exclusive access to I. The external environment supplies passenger requests and emergency/reset commands. The controller architecture is summarized by the communication interfaces in Section~\ref{sec:actions}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{Figures/Blank diagram (2).png}
+    \caption{Architecture of the Touchpoint Towers controller, showing the four parallel processes and their communication interfaces.}
+    \label{fig:architecture}
+\end{figure}
+
+The aim is to specify the controller in mCRL2 and verify collision prevention, door and service safety, correct transfers, and progress. Optimization of waiting time and travel distance is outside the project's scope.
+
+\section{Modelling Assumptions and Abstractions}
+\label{sec:assumptions}
+
+The model retains discrete changes of state relevant to the requirements; physical time and continuous movement are abstracted away.
+
+\begin{enumerate}[leftmargin=2.2em,itemsep=0.45\baselineskip]
+  \item \textbf{Locations and movement.} The valid passenger locations are
+  \[
+    Loc=\{I,1_A,2_A,4_A,5_A,1_B,2_B,4_B,5_B\}.
+  \]
+  Each car serves its wing and I. A movement between two levels is a single atomic action, possibly passing intermediate levels. Any path including level 3 must obey the intersection protocol.
+
+  \item \textbf{Passenger requests.} A request is a pair \((o,d)\) with \(o,d\in Loc\) and \(o\neq d\). Identical requests are merged only while awaiting their initial pickup; a later submission after pickup represents a separate demand. Passenger identities, car capacities, and floor capacities are abstracted away.
+
+  \item \textbf{Transportation legs.} A same-wing request has one leg; a cross-wing request has two legs via I. A leg is \texttt{blocked}, \texttt{waiting}, or \texttt{active}. A waiting leg becomes active at pickup and is completed at dropoff. The second cross-wing leg remains blocked until the first is completed. Requests with I as an endpoint require only one leg.
+
+  \item \textbf{Dispatching.} The oldest eligible request receives FIFO priority. A later request may be served in the same planned journey if its pickup and dropoff can be visited without reversing the primary journey's direction or violating pickup-before-dropoff order. Unmatched requests retain their relative arrival order.
+
+  \item \textbf{Stop sets.} A car's required stops are the origins of its selected waiting legs and destinations of its active legs; blocked legs contribute no stops. New requests affect subsequent movement decisions, but cannot interrupt a movement already represented by an atomic action.
+
+  \item \textbf{Shared interchange.} I has one owner in \(\{\mathrm{none},A,B\}\). A car acquires permission before entering or passing through I. It retains ownership while stopped there and releases it after departure. An idle car must not remain at I indefinitely.
+
+  \item \textbf{Emergency operation.} Emergency activation suspends elevator operations until reset. Existing positions, door states, interchange ownership, and unfinished work are preserved so that service can resume afterward.
+\end{enumerate}
+
+\section{Informal Requirements}
+\label{sec:informal-requirements}
+
+The original project requirements are stated below without reference to the modelling language. Their action-based versions appear in Section~\ref{sec:action-requirements}, followed by their formalization in Section~\ref{sec:mu-calculus}.
+
+\subsection{Safety Requirements}
+\begin{enumerate}[label=\textbf{S\arabic*.},leftmargin=3em,itemsep=0.32\baselineskip]
+  \item At most one elevator may occupy the shared interchange I at a time.
+  \item An elevator must have permission before entering or crossing I.
+  \item An elevator must never move with its doors open.
+  \item Passenger service must occur with the elevator doors open.
+  \item An elevator may serve a level only when it has work at that level.
+  \item A passenger changing wings may board the second elevator only after arriving at I on the first.
+  \item A request must not be reported completed unless it was accepted and has not already been completed.
+  \item Both elevators must stop moving when the emergency system is active.
+  \item An elevator must not pass an outstanding required stop without serving it.
+  \item An elevator may open its doors only where passenger service is required.
+\end{enumerate}
+
+\subsection{Liveness Requirements}
+\begin{enumerate}[label=\textbf{L\arabic*.},leftmargin=3em,itemsep=0.32\baselineskip]
+  \item The controller must be free from deadlock.
+  \item Every accepted request must eventually be completed during uninterrupted normal operation without further external requests.
+  \item Every outstanding request must remain capable of being completed.
+  \item An elevator must not occupy or reserve I indefinitely during uninterrupted normal operation without further external requests.
+\end{enumerate}
+
+\section{Actions and Interactions}
+\label{sec:actions}
+
+The observable actions form the interface between the informal requirements and the mCRL2 model. Here \(e\in\{A,B\}\), \(f_1,f_2,n\in\{1,\ldots,5\}\), \(o,d\in Loc\), and \(S\subseteq\{1,\ldots,5\}\).
+
+\begingroup
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{longtable}{@{}p{0.29\linewidth}p{0.24\linewidth}p{0.41\linewidth}@{}}
+  \caption{Intended observable action interface.}\label{tab:actions}\\
+  \toprule
+  \textbf{Action} & \textbf{Component(s)} & \textbf{Meaning}\\
+  \midrule
+  \endfirsthead
+  \toprule
+  \textbf{Action} & \textbf{Component(s)} & \textbf{Meaning}\\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  \(\mathsf{request}(o,d)\) & Environment, dispatcher & Accepts transportation from \(o\) to \(d\).\\
+  \(\mathsf{stops}(e,S)\) & Dispatcher, car \(e\) & Communicates the required stop set.\\
+  \(\mathsf{move}(e,f_1,f_2)\) & Car \(e\) & Moves atomically from \(f_1\) to \(f_2\).\\
+  \(\mathsf{open}(e)\) & Car \(e\) & Opens its doors.\\
+  \(\mathsf{close}(e)\) & Car \(e\) & Closes its doors.\\
+  \(\mathsf{visit}(e,n)\) & Car \(e\), dispatcher & Reports service at level \(n\).\\
+  \(\mathsf{pickup}(e,o,d)\) & Dispatcher & Activates transportation leg \((o,d)\).\\
+  \(\mathsf{dropoff}(e,o,d)\) & Dispatcher & Completes transportation leg \((o,d)\).\\
+  \(\mathsf{done}(o,d)\) & Dispatcher & Reports original request completion.\\
+  \(\mathsf{enterI}(e)\) & Car \(e\), intersection manager & Grants exclusive access to I.\\
+  \(\mathsf{leaveI}(e)\) & Car \(e\), intersection manager & Releases access after leaving I.\\
+  \(\mathsf{emergency}\) & Environment, both cars & Activates the emergency stop.\\
+  \(\mathsf{reset}\) & Environment, both cars & Ends the emergency stop.\\
+\end{longtable}
+\endgroup
+
+The dispatcher and a car synchronize on \(\mathsf{stops}\) and \(\mathsf{visit}\); each car synchronizes with the intersection manager on \(\mathsf{enterI}\) and \(\mathsf{leaveI}\). Emergency/reset inputs must be coordinated consistently between both cars. The final specification must leave visible every action used in the formulas below.
+
+\section{Requirements in Terms of Actions}
+\label{sec:action-requirements}
+
+The identifiers below correspond exactly to those in Section~\ref{sec:informal-requirements}. They specify prohibited or required sequences of the observable actions in Table~\ref{tab:actions}, without yet invoking the modal \(\mu\)-calculus.
+
+\subsection{Safety Requirements}
+\begin{enumerate}[label=\textbf{S\arabic*.},leftmargin=3em,itemsep=0.45\baselineskip]
+  \item Between \(\mathsf{enterI}(e)\) and \(\mathsf{leaveI}(e)\), no \(\mathsf{enterI}(e')\) with \(e'\neq e\) may occur.
+  \item Every \(\mathsf{move}(e,f_1,f_2)\) with \(\min(f_1,f_2)\leq 3\leq\max(f_1,f_2)\) must occur after the car's \(\mathsf{enterI}(e)\) and before its \(\mathsf{leaveI}(e)\).
+  \item After \(\mathsf{open}(e)\), no \(\mathsf{move}(e,f_1,f_2)\) may occur before \(\mathsf{close}(e)\).
+  \item Every \(\mathsf{visit}(e,n)\) must occur after \(\mathsf{open}(e)\) and before \(\mathsf{close}(e)\).
+  \item Between successive \(\mathsf{stops}(e,S)\) updates, no \(\mathsf{visit}(e,n)\) may occur for \(n\notin S\).
+  \item For a cross-wing demand, the second-leg pickup at I must follow the first-leg dropoff. Thus \(\mathsf{dropoff}(e_1,o,I)\) precedes \(\mathsf{pickup}(e_2,I,d)\), where \(e_1\neq e_2\).
+  \item Every \(\mathsf{done}(o,d)\) must correspond to a previously accepted and still outstanding \(\mathsf{request}(o,d)\); no demand may be completed twice.
+  \item After \(\mathsf{emergency}\), no \(\mathsf{move}(e,f_1,f_2)\) may occur before \(\mathsf{reset}\). The stronger intended full suspension is documented as a design assumption.
+  \item After \(\mathsf{stops}(e,S)\), a \(\mathsf{move}(e,f_1,f_2)\) may not have any \(n\in S\) strictly between \(f_1\) and \(f_2\), until the stop set is updated.
+  \item \(\mathsf{open}(e)\) may occur only if the car's current level belongs to its most recently communicated stop set. The initial position is treated as the current level before any movement.
+\end{enumerate}
+
+\subsection{Liveness Requirements}
+\begin{enumerate}[label=\textbf{L\arabic*.},leftmargin=3em,itemsep=0.45\baselineskip]
+  \item Every reachable state must enable at least one transition.
+  \item After an accepted \(\mathsf{request}(o,d)\), a corresponding \(\mathsf{done}(o,d)\) must inevitably occur along every continuation without further \(\mathsf{request}\), \(\mathsf{emergency}\), or \(\mathsf{reset}\) actions.
+  \item After \(\mathsf{request}(o,d)\), a corresponding \(\mathsf{done}(o,d)\) must remain reachable until that demand is completed.
+  \item After \(\mathsf{enterI}(e)\), the matching \(\mathsf{leaveI}(e)\) must inevitably occur on continuations without further external requests or emergency interruptions.
+\end{enumerate}
+
+\section{Modal \texorpdfstring{$\mu$}{mu}-Calculus Properties}
+\label{sec:mu-calculus}
+
+The action-based requirements are formalized using modal \(\mu\)-calculus. In the notation used here, \([r]\varphi\) requires \(\varphi\) after every transition sequence matching regular expression \(r\); \(\langle r\rangle\varphi\) requires at least one such sequence. The expression \(\mathrm{true}^{*}\) denotes an arbitrary finite action sequence. The formulas are stored as separate \texttt{.mcf} files and evaluated against the linearized mCRL2 specification.
+
+\subsection{Safety Properties}
+\label{subsec:safety-properties}
+
+\paragraph{S1: Mutual exclusion (candidate).}
+\begin{lstlisting}
+forall e,e2: Car .
+  val(e != e2) =>
+    [true* . enterI(e) . (!leaveI(e))* . enterI(e2)] false
+\end{lstlisting}
+The formula excludes a second grant while another car retains ownership. It cannot yet be checked against the preliminary model because the intersection actions are not implemented.
+
+\paragraph{S2: Authorized intersection access (candidate).}
+\begin{lstlisting}
+forall e: Car .
+  (
+    [(!enterI(e))* .
+      (exists f1,f2: Nat .
+        val((f1 <= 3 && 3 <= f2) ||
+            (f2 <= 3 && 3 <= f1)) && move(e,f1,f2))] false
+    &&
+    [true* . leaveI(e) . (!enterI(e))* .
+      (exists f1,f2: Nat .
+        val((f1 <= 3 && 3 <= f2) ||
+            (f2 <= 3 && 3 <= f1)) && move(e,f1,f2))] false
+  )
+\end{lstlisting}
+This formulation assumes neither car initially owns I. The precise action-formula syntax must be parsed against the completed model before submission.
+
+\paragraph{S3: Movement with closed doors.}
+\begin{lstlisting}
+forall e: Car .
+  [true* . open(e) . (!close(e))* .
+    (exists f1,f2: Nat . move(e,f1,f2))] false
+\end{lstlisting}
+This prohibits any movement by a car after opening and before closing its doors.
+
+\paragraph{S4: Service with open doors.}
+\begin{lstlisting}
+forall e: Car .
+  (
+    [(!open(e))* . (exists n: Nat . visit(e,n))] false
+    &&
+    [true* . close(e) . (!open(e))* .
+      (exists n: Nat . visit(e,n))] false
+  )
+\end{lstlisting}
+This excludes service before the first opening and after a closing until the next opening; it assumes both doors are initially closed.
+
+
+
+\paragraph{S5: Service only at required stops.}
+
+\begin{lstlisting}
+forall e: Car .
+forall n: Nat .
+  val(n >= 1 && n <= 5) =>
+  (
+    [(!(exists T: FSet(Nat) . stops(e,T)))* .
+      visit(e,n)] false
+    &&
+    [true* .
+      (exists S: FSet(Nat) .
+        stops(e,S) && val(!(n in S))) .
+      (!(exists T: FSet(Nat) . stops(e,T)))* .
+      visit(e,n)] false
+  )
+\end{lstlisting}
+
+The formula prohibits service before a stop set has been communicated and ensures that subsequent visits belong to the most recently assigned stop set.
+
+
+\paragraph{S6: Correct passenger transfer order.}
+
+A request-specific formula is not yet expressible through the current action interface. The actions representing pickup and dropoff do not identify the original transportation demand. Furthermore, a pickup at the interchange may represent either a transfer or a journey originating at I.
+
+
+\paragraph{S7: No phantom completions.}
+
+\begin{lstlisting}
+forall o,d: Loc .
+  nu X(accepted: Nat = 0, finished: Nat = 0) .
+  (
+    [request(o,d)] X(accepted + 1, finished)
+    &&
+    [done(o,d)]
+      (val(finished < accepted) &&
+       X(accepted, finished + 1))
+    &&
+    [!(request(o,d) || done(o,d))]
+      X(accepted, finished)
+  )
+\end{lstlisting}
+
+
+\paragraph{S8: Emergency suspension.}
+
+\begin{lstlisting}
+forall e: Car .
+  [true* . emergency . (!reset)* .
+    (exists f1,f2: Nat . move(e,f1,f2))] false
+\end{lstlisting}
+
+The formula prohibits elevator movement between emergency activation and the subsequent reset. It expresses the original movement-suspension requirement; the stronger assumption of suspending all elevator operations requires an additional check.
+
+
+\paragraph{S9: No skipped required stops.}
+
+\begin{lstlisting}
+forall e: Car .
+forall n: Nat .
+  val(n >= 1 && n <= 5) =>
+    [true* .
+      (exists S: FSet(Nat) .
+        stops(e,S) && val(n in S)) .
+      (!(exists T: FSet(Nat) . stops(e,T)))* .
+      (exists f1,f2: Nat .
+        move(e,f1,f2) &&
+        val((f1 < n && n < f2) ||
+            (f2 < n && n < f1)))] false
+\end{lstlisting}
+
+Following the communication of a required stop set, the formula forbids movements that skip any included intermediate level. The restriction remains in effect until the stop set is updated.
+
+
+\paragraph{S10: Door opening only for service.}
+
+\begin{lstlisting}
+forall e: Car .
+  nu X(pos: Nat = 1, S: FSet(Nat) = {}) .
+  (
+    (forall T: FSet(Nat) .
+      [stops(e,T)] X(pos,T))
+    &&
+    (forall f1,f2: Nat .
+      [move(e,f1,f2)] X(f2,S))
+    &&
+    [!((exists T: FSet(Nat) . stops(e,T)) ||
+       (exists f1,f2: Nat . move(e,f1,f2)))]
+      X(pos,S)
+    &&
+    [open(e)] val(pos in S)
+  )
+\end{lstlisting}
+
+The greatest fixed point tracks the current elevator position and its latest required stop set. Stop-set updates replace the stored assignment, while movement updates the position. Door opening is permitted only when the current position belongs to the stored stop set. The initial position is assumed to be level 1.
+
+
+\subsection{Liveness Properties}
+\label{subsec:liveness-properties}
+
+The liveness properties concern the ability of the controller to make progress. In particular, they distinguish between the possibility of completing a request and its inevitable completion under uninterrupted normal operation.
+
+\paragraph{L1: Deadlock freedom.}
+
+\begin{lstlisting}
+[true*]<true>true
+\end{lstlisting}
+
+The formula requires every reachable state to have at least one enabled transition. This excludes deadlocks but does not guarantee progress towards the completion of outstanding requests.
+
+\paragraph{L2: Eventual request completion.}
+
+\begin{lstlisting}
+nu M(normal: Bool = true) .
+(
+  [emergency] M(false)
+  &&
+  [reset] M(true)
+  &&
+  (forall o,d: Loc .
+    [request(o,d)]
+      (
+        M(normal)
+        &&
+        (
+          val(!normal)
+          ||
+          mu X .
+          (
+            [!(done(o,d) ||
+               (exists x,y: Loc . request(x,y)) ||
+               emergency || reset)] X
+            &&
+            <!( (exists x,y: Loc . request(x,y)) ||
+                 emergency || reset)> true
+          )
+        )
+      )
+  )
+  &&
+  [!(emergency || reset ||
+     (exists x,y: Loc . request(x,y)))]
+    M(normal)
+)
+\end{lstlisting}
+
+The outer greatest fixed point tracks whether the controller operates normally or is suspended by an emergency. For requests accepted during normal operation, the inner least fixed point requires inevitable completion in the absence of further external requests, emergencies, or resets. This excludes both deadlock and infinite postponement without relying on scheduling fairness assumptions.
+
+\paragraph{L3: Persistent serviceability.}
+
+\begin{lstlisting}
+forall o,d: Loc .
+  [true* . request(o,d) . (!done(o,d))*]
+    <true* . done(o,d)> true
+\end{lstlisting}
+
+The formula requires every outstanding request to retain at least one possible continuation leading to its completion. Unlike L2, it establishes reachability rather than inevitable completion along every execution.
+
+\paragraph{L4: Eventual intersection release.}
+
+\begin{lstlisting}
+forall e: Car .
+  [true* . enterI(e)]
+    mu X .
+    (
+      [!(leaveI(e) ||
+         (exists o,d: Loc . request(o,d)) ||
+         emergency || reset)] X
+      &&
+      <!( (exists o,d: Loc . request(o,d)) ||
+           emergency || reset)> true
+    )
+\end{lstlisting}
+
+Following acquisition of Touchpoint I, the least fixed point requires the elevator to release ownership after finitely many steps during uninterrupted normal operation without further external requests. This excludes executions in which an elevator indefinitely retains the shared resource without making progress.
+
+
+\section{Behavioural Specification in mCRL2}
+\label{sec:behavioural-specification}
+
+The full source file is maintained alongside the mCRL2 project. The intended specification composes the dispatcher, both elevator processes and the intersection manager in parallel. Synchronization enforces the interactions described in Section~\ref{sec:actions}; restriction prevents unsynchronized component halves from occurring independently.
+
+
+\section{Verification}
+\label{sec:verification}
+
+Verification is performed on the mCRL2 model associated with the documented source revision. For each requirement, the final report will provide the exact property file, the result, and reproducibility details (tool version, operating system, commands, and state-space size).
+
+\section{Discussion}
+\label{sec:discussion}
+
+
+
