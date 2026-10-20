@@ -112,3 +112,43 @@ Locations are `Loc = struct I | fl(w: Car, n: Nat)` with n ∈ {1, 2, 4, 5}; a c
 | ID | Requirement | In terms of actions |
 | --- | --- | --- |
 | P1 | LOOK: a car never reverses while work lies ahead. | A move is up if f2 > f1, else down. After `stops(e, S)`, a move against the previous direction only occurs when S has no level ahead in that direction. |
+
+## 5. Formula revisions
+
+A record of formulas that had to change, and why, for the report.
+
+### S2: quantifier moved inside the action (2026-10-20)
+
+**Original** (`TouchpointTowers/properties/S2.mcf`, 18 Oct):
+
+```
+forall e: Car .
+forall f1,f2: Nat .
+  val(((f1 <= 3) && (3 <= f2)) ||
+      ((f2 <= 3) && (3 <= f1))) =>
+  (
+    [(!enterI(e))* . move(e,f1,f2)] false
+    &&
+    [true* . leaveI(e) . (!enterI(e))* .
+      move(e,f1,f2)] false
+  )
+```
+
+**Problem:** the check never terminates. The outer `forall f1, f2: Nat` asks the solver to check the formula for every pair of natural numbers that satisfies the condition, and there are infinitely many (`f2` can be 3, 4, 5, …, 10 000, …). The solver enumerates them one by one, forever, regardless of model size. (S5 and S9 also quantify over `Nat` at the top level, but bound it with `val(n >= 1 && n <= 5)`, which is why they terminate.)
+
+**Revised** (same meaning, as in the report's draft):
+
+```
+forall e: Car .
+  (
+    [(!enterI(e))* .
+      (exists f1,f2: Nat .
+        val((f1 <= 3 && 3 <= f2) || (f2 <= 3 && 3 <= f1)) && move(e,f1,f2))] false
+    &&
+    [true* . leaveI(e) . (!enterI(e))* .
+      (exists f1,f2: Nat .
+        val((f1 <= 3 && 3 <= f2) || (f2 <= 3 && 3 <= f1)) && move(e,f1,f2))] false
+  )
+```
+
+With the `exists` inside the action formula, `f1` and `f2` only range over moves that the model can actually perform at that point, which are finitely many. The requirement itself is unchanged: every move whose range includes level 3 lies between an `enterI(e)` and the next `leaveI(e)`.
