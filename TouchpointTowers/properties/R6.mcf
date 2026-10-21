@@ -1,0 +1,2 @@
+% R6 (sanity for S7, L2, L3): a same-wing request is completed.
+<true* . done(fl(A, 1), fl(A, 5))> true

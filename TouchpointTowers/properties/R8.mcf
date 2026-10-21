@@ -1,0 +1,2 @@
+% R8 (sanity for S8): the emergency happens, and after reset a car moves again.
+<true* . emergency . (!reset)* . reset . true* . exists f1, f2: Nat . move(A, f1, f2)> true

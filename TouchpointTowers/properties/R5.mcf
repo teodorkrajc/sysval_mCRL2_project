@@ -1,0 +1,3 @@
+% R5 (sanity for S5, S9): a stop set with more than one level occurs, so skipping a stop
+% would be possible at all. Needs MAXPOOL >= 2: with one request, stop sets have at most one level.
+<true* . stops(A, {1, 5})> true

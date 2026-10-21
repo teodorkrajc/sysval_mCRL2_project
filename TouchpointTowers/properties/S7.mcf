@@ -1,13 +1,17 @@
-
-forall o,d: Loc .
-  nu X(accepted: Nat = 0, finished: Nat = 0) .
+% S7: no phantom completions: done(o, d) only happens while a request (o, d) is outstanding.
+% Revised 2026-10-21, original in docs/design.md section 5.
+% k = number of outstanding requests for (o, d), capped at MAXPOOL so the check terminates.
+% Capping is sound: the capped k is never larger than the real count, so a done that
+% passes the capped check (k > 0) also passes the real one.
+forall o, d: Loc . val(validLoc(o) && validLoc(d)) =>
+  nu X(k: Nat = 0) .
   (
-    [request(o,d)] X(accepted + 1, finished)
+    % a request adds one outstanding demand (up to the cap)
+    [request(o, d)] X(min(k + 1, MAXPOOL))
     &&
-    [done(o,d)]
-      (val(finished < accepted) &&
-       X(accepted, finished + 1))
+    % a done is only allowed while something is outstanding, and settles one demand
+    [done(o, d)] (val(k > 0) && X(if(k > 0, Int2Nat(k - 1), 0)))
     &&
-    [!(request(o,d) || done(o,d))]
-      X(accepted, finished)
+    % anything else leaves the count unchanged
+    [!(request(o, d) || done(o, d))] X(k)
   )

@@ -1,6 +1,18 @@
 
+\section{Introduction}
+\label{sec:introduction}
+%%% GUIDE (new section): short, about half a page.
+%%% - Course context: System Validation (2IMF30); goal = design a controller, state requirements, verify them with mCRL2.
+%%% - The system in two sentences: two elevators in two wings, rails meet at one shared floor I (mutex + transfer point).
+%%% - Why this system is interesting to verify: forced cooperation (cross-wing trips need both cars), a shared resource,
+%%%   a hand-over between components, and bookkeeping (one stop can start and finish several requests at once).
+%%% - What the reader gets: model, requirements as mu-calculus, verification results, discussion of design decisions.
+%%% - Roadmap of the report (one sentence per section).
+
 \section{System Description}
 \label{sec:system-description}
+%%% GUIDE: purpose, layout and operation of the system, no modelling language yet.
+%%% - Keep the Creation-of-Adam story short; the layout (5 levels per wing, level 3 = I) is what matters.
 
 \subsection{Purpose and Physical Layout}
 
@@ -10,10 +22,20 @@ Touchpoint I serves as both the intersection of the two elevator tracks and the 
 
 \subsection{System Operation}
 
+%%% FIX: the paragraph below says requests are prioritized FIFO and grouped. The model does NOT do this.
+%%%   The model: each car runs LOOK over its stop set (nearest stop ahead in its direction, reverse only when
+%%%   nothing lies ahead); there is no ordering between requests. Rewrite to match (design.md, "Modelling goals":
+%%%   schedule optimality is out of scope).
+%%% FIX: "decomposes cross-wing journeys into legs": true, but the second leg is only created when the passenger
+%%%   arrives at I (see Behavioural Specification, cross-wing requests).
 The system employs destination dispatch: passengers specify their destination at a terminal, while their origin is determined by the terminal's location. A central dispatcher maintains outstanding requests, decomposes cross-wing journeys into legs, and prioritizes requests according to a first-in, first-out (FIFO) policy. Later requests may be grouped with a selected request when their journeys are compatible.
 
 The controller has four parallel components: the dispatcher, elevators A and B, and the intersection manager. The dispatcher assigns work, the elevators perform movements and passenger service, and the intersection manager coordinates exclusive access to I. The external environment supplies passenger requests and emergency/reset commands. The controller architecture is summarized by the communication interfaces in Section~\ref{sec:actions}.
 
+%%% FIX: the controller now has FIVE parallel processes: dispatcher, car A, car B, intersection manager, and the
+%%%   emergency switch (plays the role of the emergency button and gates moves, requests and I-grants).
+%%%   Update the figure and its caption ("four parallel processes"). Decide whether the switch counts as part of the
+%%%   controller or of the environment, and say so (the course requires >= 3 controller components; we have 4 either way).
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.7\textwidth]{Figures/Blank diagram (2).png}
@@ -25,6 +47,25 @@ The aim is to specify the controller in mCRL2 and verify collision prevention, d
 
 \section{Modelling Assumptions and Abstractions}
 \label{sec:assumptions}
+%%% GUIDE: every abstraction the model makes, each with a one-line justification. Items to fix / add:
+%%% FIX item 2 (merging): the model merges identical pool entries in ANY state, not only before pickup
+%%%   (e.g. two passengers on the same trip who are both in the car merge too; they get off together).
+%%%   Consequence: one done(o,d) can cover several merged requests (relevant for L2, S7, discussion).
+%%% FIX item 3 (legs): there is no "blocked" state in the model. A cross-wing request is ONE pool entry that is
+%%%   rewritten into its second leg when the first car drops the passenger at I (design.md 6.1).
+%%% FIX item 4 (dispatching): no FIFO, no grouping; LOOK per car over its stop set.
+%%% FIX item 5 (stop sets): remove "blocked legs"; say WHEN a car reads its stop set: once per cycle, before
+%%%   choosing its next target (read -> move -> open -> visit -> close -> read ...).
+%%% FIX item 6 (interchange): add the idle rule: a car at I with no work moves one level on in its current direction
+%%%   and releases I, without opening its doors.
+%%% FIX item 7 (emergency): state our semantics precisely: no new moves, no new requests, no new I-grants until reset;
+%%%   a car that is already serving a floor may finish (open, visit, close); doors are NOT opened by the emergency
+%%%   (would contradict S10); all state is preserved, so service resumes after reset.
+%%% ADD: the pool is bounded by MAXPOOL requests; a request is refused (not offered) while the pool is full.
+%%%   Say which value was verified and why (MAXPOOL = 1 feasible; MAXPOOL = 2 state space too large; see Verification).
+%%% ADD: a car serves its current floor if it has work there (no move); forbidding this would starve a passenger who
+%%%   requests at the car's current floor when there is no other work (L2 would fail).
+%%% ADD: no time, no capacities, no passenger identities (requests are trips (o,d), not people).
 
 The model retains discrete changes of state relevant to the requirements; physical time and continuous movement are abstracted away.
 
@@ -50,6 +91,8 @@ The model retains discrete changes of state relevant to the requirements; physic
 
 \section{Informal Requirements}
 \label{sec:informal-requirements}
+%%% GUIDE: the requirement list can stay. Optionally one sentence on why S8 is read as "no movement", and
+%%%   how the emergency semantics in the assumptions go beyond it.
 
 The original project requirements are stated below without reference to the modelling language. Their action-based versions appear in Section~\ref{sec:action-requirements}, followed by their formalization in Section~\ref{sec:mu-calculus}.
 
@@ -77,6 +120,14 @@ The original project requirements are stated below without reference to the mode
 
 \section{Actions and Interactions}
 \label{sec:actions}
+%%% FIX: pickup/dropoff do NOT exist in the model (S6 is argued by construction instead). Remove them from the
+%%%   table, or mark them as "considered, not modelled" and refer to the S6 discussion.
+%%% FIX: emergency / reset are performed by the emergency switch alone (the button); the cars do not take part.
+%%% FIX: enterI is a three-party synchronisation (car, intersection manager, emergency switch); move and request
+%%%   are synchronised with the switch too. Mention this below the table.
+%%% ADD: explain the naming convention for synchronisation halves (_d dispatcher, _c car, _im intersection manager,
+%%%   _em emergency switch) and that only the unsuffixed result of comm is allowed (so a half can never happen alone);
+%%%   the result is a named visible action rather than tau, because the requirements are written over it.
 
 The observable actions form the interface between the informal requirements and the mCRL2 model. Here \(e\in\{A,B\}\), \(f_1,f_2,n\in\{1,\ldots,5\}\), \(o,d\in Loc\), and \(S\subseteq\{1,\ldots,5\}\).
 
@@ -115,6 +166,9 @@ The dispatcher and a car synchronize on \(\mathsf{stops}\) and \(\mathsf{visit}\
 
 \section{Requirements in Terms of Actions}
 \label{sec:action-requirements}
+%%% FIX S6: the action version uses pickup/dropoff, which the model does not have. Either keep it as the intended
+%%%   requirement and state that it is guaranteed by construction (and why it cannot be expressed over our actions),
+%%%   or rephrase. See mu-calculus section, S6.
 
 The identifiers below correspond exactly to those in Section~\ref{sec:informal-requirements}. They specify prohibited or required sequences of the observable actions in Table~\ref{tab:actions}, without yet invoking the modal \(\mu\)-calculus.
 
@@ -142,12 +196,17 @@ The identifiers below correspond exactly to those in Section~\ref{sec:informal-r
 
 \section{Modal \texorpdfstring{$\mu$}{mu}-Calculus Properties}
 \label{sec:mu-calculus}
+%%% GUIDE: for each formula: the formula, one or two sentences on how to read it, and for the data-carrying ones
+%%%   (S5, S7, S9, S10, L2) what the fixpoint parameters track. Point to the Formula Revisions subsection for the
+%%%   three formulas that changed, and to the Sanity Checks subsection.
 
 The action-based requirements are formalized using modal \(\mu\)-calculus. In the notation used here, \([r]\varphi\) requires \(\varphi\) after every transition sequence matching regular expression \(r\); \(\langle r\rangle\varphi\) requires at least one such sequence. The expression \(\mathrm{true}^{*}\) denotes an arbitrary finite action sequence. The formulas are stored as separate \texttt{.mcf} files and evaluated against the linearized mCRL2 specification.
 
 \subsection{Safety Properties}
 \label{subsec:safety-properties}
 
+%%% FIX: S1 and S2 are no longer candidates: drop "(candidate)" and the sentences saying the intersection actions are
+%%%   not implemented / the syntax still has to be parsed.
 \paragraph{S1: Mutual exclusion (candidate).}
 \begin{lstlisting}
 forall e,e2: Car .
@@ -216,11 +275,22 @@ forall n: Nat .
 The formula prohibits service before a stop set has been communicated and ensures that subsequent visits belong to the most recently assigned stop set.
 
 
+%%% FIX S6: replace by the "by construction" argument:
+%%%   - leg 2 of a cross-wing trip only comes into existence when car A drops the passenger at I (the pool entry is
+%%%     rewritten in afterVisit); before that there is nothing for car B to serve, so the order cannot be violated;
+%%%   - why no formula: boarding is not an observable action, and the pool has no passenger identities (identical
+%%%     requests merge), so a per-passenger formula cannot be stated over our action interface;
+%%%   - what it would take: pickup/dropoff report actions + a counter formula (pickups at I <= drop-offs at I per trip);
+%%%   - sanity check R7 shows cross-wing trips are actually completed. Tutor's view: see docs/questions.md Q1.
 \paragraph{S6: Correct passenger transfer order.}
 
 A request-specific formula is not yet expressible through the current action interface. The actions representing pickup and dropoff do not identify the original transportation demand. Furthermore, a pickup at the interchange may represent either a transfer or a journey originating at I.
 
 
+%%% FIX S7: replace the formula by the revised one in TouchpointTowers/properties/S7.mcf (one counter k of outstanding
+%%%   requests, capped at MAXPOOL, plus the validLoc bound). Explain the cap's soundness in two sentences:
+%%%   capped k <= real count, so passing the capped check implies passing the original; and k never drops below the
+%%%   number of pool entries for (o,d), so it cannot fail spuriously. Details: design.md section 5.
 \paragraph{S7: No phantom completions.}
 
 \begin{lstlisting}
@@ -305,6 +375,11 @@ The liveness properties concern the ability of the controller to make progress. 
 
 The formula requires every reachable state to have at least one enabled transition. This excludes deadlocks but does not guarantee progress towards the completion of outstanding requests.
 
+%%% GUIDE L2: explain the fairness problem (mCRL2 has none built in; the environment could make requests forever)
+%%%   and the two exclusions: (1) paths with further request/emergency/reset are excluded, (2) the normal flag skips
+%%%   requests made during an emergency (in our model those cannot happen anyway: the switch blocks requests).
+%%%   Limitation for the discussion: done(o,d) names a trip, not a passenger, so an older finished (o,d) can satisfy L2
+%%%   for a newer identical request.
 \paragraph{L2: Eventual request completion.}
 
 \begin{lstlisting}
@@ -343,6 +418,7 @@ nu M(normal: Bool = true) .
 
 The outer greatest fixed point tracks whether the controller operates normally or is suspended by an emergency. For requests accepted during normal operation, the inner least fixed point requires inevitable completion in the absence of further external requests, emergencies, or resets. This excludes both deadlock and infinite postponement without relying on scheduling fairness assumptions.
 
+%%% FIX L3: add the bound `val(validLoc(o) && validLoc(d)) =>` as in TouchpointTowers/properties/L3.mcf.
 \paragraph{L3: Persistent serviceability.}
 
 \begin{lstlisting}
@@ -372,19 +448,208 @@ forall e: Car .
 Following acquisition of Touchpoint I, the least fixed point requires the elevator to release ownership after finitely many steps during uninterrupted normal operation without further external requests. This excludes executions in which an elevator indefinitely retains the shared resource without making progress.
 
 
+\subsection{Formula Revisions}
+\label{subsec:formula-revisions}
+%%% GUIDE (new subsection): shows the verification process, worth keeping. Source: docs/design.md section 5.
+%%% - S2: the first version quantified `forall f1, f2: Nat` OUTSIDE the modal operators. The solver then has to check
+%%%   infinitely many pairs and never terminates. Moving the quantifier inside the action formula (exists ... && move)
+%%%   matches only the moves that actually occur. Same meaning.
+%%% - S7: two unbounded counters -> infinitely many fixpoint instances. Replaced by one capped counter (soundness argument).
+%%% - S7, L3: `forall o, d: Loc` ranges over infinitely many locations (fl(A,17), ...). Bounded with validLoc;
+%%%   not a weakening because request/done only occur with valid locations.
+%%% - General lesson: quantifiers over infinite sorts at the top of a formula must be bounded or moved into the action.
+
+\subsection{Sanity Checks}
+\label{subsec:sanity-checks}
+%%% GUIDE (new subsection): why: a safety formula [..] false is also true if the actions never happen at all
+%%%   (a model where cars never move satisfies S3). Each property gets a reachability formula <..> true showing that
+%%%   its scenario actually occurs. List R1-R9 (TouchpointTowers/properties/R*.mcf) with the property each supports:
+%%%   R1/R2 enterI by A and B (S1, S2, L4); R3 crossing 2->4 (S2); R4 open + visit (S3, S4, S10);
+%%%   R5 stop set {1,5} (S5, S9); R6 same-wing done (S7, L2, L3); R7 cross-wing done (S6, L2, L3);
+%%%   R8 emergency, reset, then movement again (S8); R9 idle car steps off I (L4, idle rule).
+%%% - KEY OBSERVATION: R5 is FALSE at MAXPOOL = 1: with one request a stop set has at most one level, so S9
+%%%   ("never skip a stop") is vacuously true at MAXPOOL = 1. Discuss what this means for the verified bound.
+
 \section{Behavioural Specification in mCRL2}
 \label{sec:behavioural-specification}
+%%% GUIDE: an engineer must be able to rebuild the controller from this section. Per component: state (process
+%%%   parameters), what it can do in each state (the + branches), and how each action changes the state.
+%%%   Show key snippets; the full spec goes in the appendix. Decisions worth including are listed per subsection.
+
+\subsection{Data}
+\label{subsec:data}
+%%% - Loc = I | fl(wing, lvl); validLoc needed because Nat is infinite (fl(A,17) is a legal term).
+%%% - Request = req(origSrc, origDst, src, dst, st), st in {waiting, active, finished}: original trip + current leg.
+%%% - Pool = List(Req) kept SORTED and DUPLICATE-FREE by ins. Why not FSet: mCRL2 cannot pattern-match on FSet, so
+%%%   recursive functions over it (stop sets, visit updates) cannot be written; we tested this.
+%%%   Why sorted: [x,y] and [y,x] would otherwise be different states for the same pool (state-space blow-up);
+%%%   sorting uses the < that mCRL2 generates for every struct.
+%%% - Stop sets stay FSet(Nat): they only need membership tests.
+%%% - Conditional equations for nextUp/nextDown: an if() version made mcrl22lps loop forever, because during
+%%%   linearisation the position is still a variable and the rewriter unfolds the recursion endlessly; a conditional
+%%%   equation only fires once its condition is decidable. Demonstrated with mcrl2i. (Source: docs/questions.md Q7.)
+
+\subsection{Dispatcher}
+\label{subsec:dispatcher}
+%%% - State: the pool. Branches: accept request (guard: valid, o != d, pool not full); offer car e its stop set
+%%%   stopsOf(e, pool); process visit(e, n) via afterVisit; report done for a finished request.
+%%% - NO PHASES: our first idea was a cycle "bookkeeping -> send stopsA -> send stopsB -> wait". With blocking
+%%%   handshakes this deadlocks (dispatcher waits for car B to take its stops, car B waits for the dispatcher to accept
+%%%   its visit). Instead all branches are always offered; bookkeeping is the new parameter value of the transition.
+%%% - Stop set = origins of waiting entries + current-leg destinations of active entries; finished contributes nothing.
+%%% - afterVisit: board (waiting -> active), drop off (active -> finished, or rewritten into leg 2 at I), keep others;
+%%%   re-insert with ins (a changed entry may move in the order or merge with an identical one).
+%%% - done branch: a + branch, not a clean-up mode (a mode would block requests and visits); sums over o, d: Loc with
+%%%   validLoc guards because that pattern is known to enumerate. Why done at all: design.md 6.2.
+
+\subsection{Elevators}
+\label{subsec:elevators}
+%%% - State: e, pos, dir. Three phases as separate processes (Elevator: read stops + choose target; Go: move with the
+%%%   intersection protocol; Serve: open, visit, close). mCRL2 merges them into one state machine.
+%%% - Reading the stop set: sum S . (S != {} || pos == 3) -> stops_c(e, S). The guard makes an idle car WAIT instead of
+%%%   polling; polling an empty stop set forever would be a livelock that breaks the "inevitably" in L2/L4.
+%%% - LOOK: target = current level if it has work, else nearest stop ahead, else nearest behind (reverse).
+%%%   Serving the current floor is allowed; forbidding it starves a lone request at the car's floor. No livelock:
+%%%   a visit always removes that level from the stop set.
+%%% - Intersection protocol, from the observation "a car holds I exactly when it is at level 3 (or inside its own
+%%%   crossing move)": no 3 -> move; to 3 -> enterI.move; from 3 -> move.leaveI; through 3 -> enterI.move.leaveI.
+%%%   The if-else chain was checked strongly bisimilar to a two-question version (needEnter / needLeave) with ltscompare.
+%%% - Idle at I: with no work, a car at 3 reads {} and moves one level on in its direction, then leaves I, without
+%%%   serving (opening the doors there would violate S10). Without this rule an idle car blocks I forever (L4).
+%%% - Pitfall worth a sentence: writing the work and idle branches as two separate stops_c branches made the
+%%%   linearizer cluster them, after which sum elimination could no longer remove `sum S: FSet(Nat)` and state space
+%%%   generation failed ("cannot enumerate FSet(Nat)"). One branch with an inner if-then-else fixed it.
+
+\subsection{Intersection Manager}
+\label{subsec:intersection-manager}
+%%% - State: free | heldBy(e). Free: any car may enterI. Held by e: only e may leaveI. Two lines of mCRL2.
+%%% - The dispatcher and the intersection manager do not need to communicate.
+%%% - Mention: no fairness between the cars for access to I (A could in principle always win); not required by S1-L4.
+
+\subsection{Emergency Switch}
+\label{subsec:emergency-switch}
+%%% - Design goal: an emergency PAUSES the system, it does not reset it; otherwise requests would be lost and
+%%%   "every request is eventually served" would be false.
+%%% - The switch is a separate process (the button): on/off, and it must take part in every move, request and
+%%%   enterI, which it only allows while off. Everything else (stop-set reads, visits, done) is bookkeeping and continues.
+%%% - Moves are atomic, so there is no "mid-move" to interrupt: no new move starts.
+%%% - enterI gating was found by reviewing L4 before running it: without it, a car could acquire I during an emergency
+%%%   and then be unable to move, so L4's "leaveI inevitably follows" fails. Good example of model review.
+%%% - Compared to the first design (both cars synchronise on emergency/reset directly), the cars barely change.
+
+\subsection{Cross-wing Requests}
+\label{subsec:cross-wing}
+%%% THE most interesting design story; source: docs/design.md section 6.1. Structure suggestion:
+%%% - Starting point: working same-wing model with (src, dst, state) triples; goal: extend with minimal disruption.
+%%% - What leg 2 needs: neither waiting (B would go to I too early) nor active (B would drop off without pickup).
+%%% - First idea "when A visits I, unblock all of B's blocked legs" is wrong: releases passengers who are not at I yet.
+%%% - Root cause: a triple cannot say which leg belongs to which trip.
+%%% - Option 1 (two linked entries, blocked leg 2) and its merge trap (a second identical request strands a passenger).
+%%% - Option 2 (one entry, rewritten at I): order by construction, no blocked state, no stranding, one pool slot per
+%%%   request, owner/stopsOf unchanged. CHOSEN.
+%%% - One vs two extra fields: same state space (the extra field is determined by the others); two chosen for
+%%%   readability. Why the original origin is needed at all: done must report the original trip.
+%%% - Walkthrough table 1A -> 4B (design.md 6.1).
+
+\subsection{Composition}
+\label{subsec:composition}
+%%% - The init: five processes in parallel, comm rules (list them), allow set (the visible actions of the table).
+%%% - Why comm + allow: halves have different names from the result, so allow can drop a half that happens alone and
+%%%   any unwanted multi-action; the result keeps a name and data, unlike tau in CCS.
 
 The full source file is maintained alongside the mCRL2 project. The intended specification composes the dispatcher, both elevator processes and the intersection manager in parallel. Synchronization enforces the interactions described in Section~\ref{sec:actions}; restriction prevents unsynchronized component halves from occurring independently.
 
 
 \section{Verification}
 \label{sec:verification}
+%%% GUIDE: reproducibility first, then results, then what we learned.
+
+\subsection{Setup and Reproducibility}
+\label{subsec:setup}
+%%% - Toolset: mCRL2 202607.0 (Release). Platform: Windows 11 Enterprise (10.0.26200). Machine: CPU/RAM if known.
+%%% - Exact commands (PowerShell, from the repository root):
+%%%     mcrl22lps -v TouchpointTowers/TouchpointTowers_spec.mcrl2 out/model.lps
+%%%     lpssumelm -v out/model.lps out/model.lps
+%%%     lpsconstelm -v out/model.lps out/model.lps
+%%%     lpsparelm -v out/model.lps out/model.lps
+%%%     lps2lts -v --threads=4 out/model.lps out/model.lts
+%%%     ltsconvert -v -ebisim out/model.lts out/model_min.lts
+%%%     per property:  lts2pbes -l out/model.lps -f <prop>.mcf out/model_min.lts out/<prop>.pbes
+%%%                    pbessolve out/<prop>.pbes
+%%% - Why this route: generate the state space once, reduce it modulo strong bisimulation (preserves every
+%%%   mu-calculus property), check all formulas against it. Much faster than on-the-fly checking per property
+%%%   in the IDE, which re-evaluates all data functions for every formula.
+%%% - Mention scripts/verify.sh once it exists.
+
+\subsection{State Space}
+\label{subsec:state-space}
+%%% - MAXPOOL = 1: 126,850 states, 332,630 transitions, generated in 7.2 s (4 threads);
+%%%   after strong-bisimulation reduction: 58,880 states, 158,208 transitions.
+%%% - MAXPOOL = 2: generation did not finish in reasonable time (give the last observed state count / time).
+%%% - Why it grows: two independent cars (positions and phases multiply), 72 possible requests, the emergency switch
+%%%   (every situation exists with and without emergency), finished requests awaiting their done. Pools grow roughly
+%%%   like "choose up to MAXPOOL of all possible entries" (measured for the dispatcher alone in an early version:
+%%%   41 / 811 / 10,291 / 93,986 states for MAXPOOL 1-4).
+
+\subsection{Results}
+\label{subsec:results}
+%%% - Table: property | result | time (from the step-5 run). S6: "by construction, not model-checked".
+%%% - Sanity checks R1-R9 with results; R5 false at MAXPOOL = 1 and what that means for S9.
+%%% - Problems found and fixed during development (shows the process): FSet enumeration failure after clustering;
+%%%   non-terminating S2/S7/L3 formulas; the L4 / enterI-during-emergency issue found by review.
 
 Verification is performed on the mCRL2 model associated with the documented source revision. For each requirement, the final report will provide the exact property file, the result, and reproducibility details (tool version, operating system, commands, and state-space size).
 
 \section{Discussion}
 \label{sec:discussion}
+%%% GUIDE: reflect honestly; this is where the design decisions and limitations pay off.
+
+\subsection{Design Decisions}
+\label{subsec:design-decisions}
+%%% - Short recap with pointers back: pool as sorted list; pull-based stop sets with blocking idle cars;
+%%%   always-offered dispatcher branches instead of phases; LOOK serving the current floor; holding I <=> at level 3;
+%%%   idle rule at I; cross-wing option 2; done via a finished state; emergency as a pause via a gating switch.
+%%% - How we worked: restarted the model from scratch with our own design after an AI-generated first draft;
+%%%   built it incrementally (one car -> two cars + intersection -> done + cross-wing -> emergency), testing each
+%%%   data function with mcrl2i before using it in a process.
+
+\subsection{Limitations}
+\label{subsec:limitations}
+%%% - Verified bound MAXPOOL = 1 only; S9 vacuous at that bound (R5). State what MAXPOOL = 2 would need.
+%%% - No passenger identities: done names a trip (L2 weakness for repeated identical requests); S6 not model-checked.
+%%% - Liveness only under the "no further environment input" assumption (no fairness); no fairness between the cars
+%%%   for access to I.
+%%% - Emergency semantics are one interpretation (no door opening because of S10).
+%%% - Schedule quality (waiting time) not addressed; LOOK only.
+
+\subsection{Future Work}
+\label{subsec:future-work}
+%%% - Bounded transfer area at I (dropped extension): expected deadlock (car at I waiting for space while the other
+%%%   car needs I to empty the area); how one would fix it.
+%%% - pickup/dropoff actions to verify S6; passenger identities.
+%%% - Fairness for access to I; state-space reduction techniques to reach MAXPOOL = 2 (symmetry, smaller request
+%%%   alphabet, compiled rewriter).
+
+\section{Conclusion}
+\label{sec:conclusion}
+%%% GUIDE (new section): what was built, what was verified (and at which bound), the two or three most important
+%%%   lessons. Half a page at most.
+
+\section{Declaration of AI Use}
+\label{sec:ai-use}
+%%% GUIDE (new section, REQUIRED by the course): which tool (Claude Code, Claude Opus 5.5), for what (onboarding and
+%%%   explanation of mCRL2 syntax, reviewing the group's model code, testing data functions, diagnosing tool problems,
+%%%   proposing formula revisions, recording design discussions, this report skeleton), and that all model code and
+%%%   report text were understood and written/checked by the group. Source: docs/ai-usage.md (dated log).
+
+\appendix
+\section{Full mCRL2 Specification}
+\label{app:spec}
+%%% GUIDE: \lstinputlisting of TouchpointTowers/TouchpointTowers_spec.mcrl2 (or paste it), at the revision verified.
+
+\section{Property Files}
+\label{app:properties}
+%%% GUIDE: all .mcf files (S1-S10, L1-L4, R1-R9) at the verified revision.
 
 
 

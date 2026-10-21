@@ -1,5 +1,14 @@
-forall i: ReqId, o,d: Loc .
-  val(crossWing(o,d)) =>
-    [true* . request(i,o,d) .
-      (!dropoff(i,carOf(o),o,I))* .
-       pickup(i,carOf(d),I,d)] false
+% S6: a transfer passenger only boards the second car at I after the first car dropped them there.
+% NOT model-checked (decision 2026-10-21): the order holds by construction. A cross-wing request
+% is one pool entry that is rewritten into its second leg only when the first car drops the
+% passenger at I (afterVisit), so no second leg exists before that. A formula cannot express
+% this: boarding is not an observable action, and the pool has no passenger identities.
+% See docs/design.md section 6.1 and docs/questions.md question 1.
+%
+% Original draft (uses a request ID and pickup/dropoff actions that the model does not have):
+%
+% forall i: ReqId, o,d: Loc .
+%   val(crossWing(o,d)) =>
+%     [true* . request(i,o,d) .
+%       (!dropoff(i,carOf(o),o,I))* .
+%        pickup(i,carOf(d),I,d)] false

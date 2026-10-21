@@ -1,0 +1,2 @@
+% R9 (sanity for L4, idle rule): a car with no work steps off I (reads {}, moves 3 -> 4).
+<true* . stops(A, {}) . move(A, 3, 4)> true

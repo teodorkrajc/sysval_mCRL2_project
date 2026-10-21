@@ -4,7 +4,7 @@
 sort Car = struct A | B; % Two cars, enumerated
 	Loc = struct I | fl(wing: Car, lvl: Nat); % lvl is 1, 2, 4 or 5; I is level 3
 	State = struct waiting | active | finished; % status of request
-	% Request shape: (original source, original destination, orig, dest, status)
+	% Request shape: (original source, original destination, current orig, current dest, status)
     Req = struct req(origSrc: Loc, origDst: Loc, src: Loc, dst: Loc, st: State);
     Pool = List(Req); % kept sorted and without duplicates by ins
 	Mutex = struct free | heldBy(holder: Car); % IM mutex state
@@ -13,9 +13,9 @@ sort Car = struct A | B; % Two cars, enumerated
 map level: Loc -> Nat; % Get the level value from Loc
 	validLoc: Loc -> Bool; % Verify validity of Loc struct
 	carOf: Loc -> Car; % Get the car value from Loc
-	toLoc: Car # Nat -> Loc; % Convert a (Car, Nat) tuple to a Loc
 	sameWing: Loc # Loc -> Bool; % Same wing check, to validate if a Car can perform a trip
 	crossIntersection: Nat # Nat -> Bool; % Does a move cross / touch the intersection?
+	newReq: Loc # Loc -> Req; % helper, makes new request based on incoming orig, dst tuple
 	MAXPOOL: Nat; % Max number of requests in the pool
 
 var w: Car;
@@ -27,21 +27,24 @@ eqn level(I) = 3;
 	validLoc(I) = true;
 	validLoc(fl(w,n)) =  n>=1 && n<=5 && n!=3;
 	carOf(fl(w,n)) = w;
-	toLoc(w, n) = if(n == 3, I, fl(w, n));
 	sameWing(x, y) = x == I || y == I || carOf(x) == carOf(y);
 	crossIntersection(n, m) = min(n, m) <= 3 && 3 <= max(n, m);
-	MAXPOOL = 2; % hardcoded
+	newReq(x, y) = req(x, y, x, if(sameWing(x,y), y, I), waiting); % create cross building requests if needed
+	MAXPOOL = 1; % hardcoded
 
 % Dispatcher Functions
 map owner: Req -> Car; % Gives owner (car) of a request
 	ins: Req # Pool -> Pool; % Insert a request to the pool
 	stopsOf: Car # Pool -> FSet(Nat); % Output set of stops for a car as a sorted FSet (no duplication)
 	afterVisit: Car # Nat # Pool -> Pool; % Update pool after a car does visit(e, n)
+	hasFinished: Loc # Loc # Pool -> Bool; % is there a finished request for the original trip (o, d)?
+	removeFinished: Loc # Loc # Pool -> Pool; % remove the finished request for the original trip (o, d)
 
 var r, q: Req;
 	p: Pool;
 	e: Car;
 	n: Nat;
+	o, d: Loc;
 
 eqn owner(r) = if(src(r) == I, carOf(dst(r)), carOf(src(r))); % src may be I; then dst decides
 	ins(r, []) = [r]; % Insert r into empty pool
@@ -57,10 +60,22 @@ eqn owner(r) = if(src(r) == I, carOf(dst(r)), carOf(src(r))); % src may be I; th
 	% Update pool after a visit
 	afterVisit(e, n, q |> p) =
 		if(owner(q) == e && st(q) == waiting && level(src(q)) == n,
-			ins(req(src(q), dst(q), active), afterVisit(e, n, p)), % board
-		if (owner(q) == e && st(q) == active && level(dst(q)) == n,
-			ins(req(src(q), dst(q), finished), afterVisit(e, n, p), % get off, q becomes finished
+			ins(req(origSrc(q), origDst(q), src(q), dst(q), active), afterVisit(e, n, p)), % board
+		if (owner(q) == e && st(q) == active && level(dst(q)) == n, % passenger is on board
+			ins(if(dst(q) == origDst(q), % check if current destination is final
+       			req(origSrc(q), origDst(q), src(q), dst(q), finished), % home
+       			req(origSrc(q), origDst(q), I, origDst(q), waiting)), % layover at I
+    			afterVisit(e, n, p)),
 			ins(q, afterVisit(e, n, p)))); % q untouched and kept
+	hasFinished(o, d, []) = false;
+	hasFinished(o, d, r |> p) =
+		(st(r) == finished && origSrc(r) == o && origDst(r) == d) || hasFinished(o, d, p);
+	% no duplicates in the pool, so stop at the first match
+	removeFinished(o, d, []) = [];
+	removeFinished(o, d, r |> p) =
+		if(st(r) == finished && origSrc(r) == o && origDst(r) == d,
+			p, % found: drop r
+			r |> removeFinished(o, d, p)); % not this one, keep searching
 
 % Elevator Functions (LOOK)
 sort Dir = struct up | down; % current direction of movement
@@ -68,8 +83,8 @@ sort Dir = struct up | down; % current direction of movement
 map nextUp: Nat # FSet(Nat) -> Nat; % nearest stop above level n; 0 if none
 	nextDown: Nat # FSet(Nat) -> Nat; % nearest stop below level n; 0 if none
 	target: Nat # Dir # FSet(Nat) -> Nat; % level to serve next
-	newDir: Nat # Dir # FSet(Nat) -> Dir; % direction after choosing 
-	moveOne: Nat # Dir -> Nat; % move by one in current direction (silly helper)
+	newDir: Nat # Dir # FSet(Nat) -> Dir; % direction after choosing next target
+	moveOne: Nat # Dir -> Nat; % move by one, only correct in I, used for parking
 
 var n: Nat;
 	d: Dir;
@@ -97,14 +112,16 @@ eqn n >= 5 -> nextUp(n, S) = 0;
 	moveOne(n, d) = if(d == up, n + 1, Int2Nat(n - 1));
 
 % Actions
-act request: Loc # Loc; % a passenger at o wants to go to d
+act request_d, request_em, request: Loc # Loc; % a passenger at o wants to go to d
 	% require different names to perform handshake on action
 	stops_d, stops_c, stops: Car # FSet(Nat); % car reads its stop set
 	visit_d, visit_c, visit: Car # Nat; % car serves a level with doors open
-	move: Car # Nat # Nat; % car jumps from one level to another
+	move_c, move_em, move: Car # Nat # Nat; % car jumps from one level to another
 	open, close: Car; % open / close doors
-	enterI_c, enterI_im, enterI: Car; % enter the intersection
+	enterI_c, enterI_im, enterI_em, enterI: Car; % enter the intersection
 	leaveI_c, leaveI_im, leaveI: Car; % leave the intersection
+	done: Loc # Loc; % complete a request
+	emergency, reset;
 
 % Processes
 
@@ -112,13 +129,15 @@ act request: Loc # Loc; % a passenger at o wants to go to d
 proc Dispatcher(pool: Pool) =
 	% add an incoming request
 	sum o, d: Loc . (validLoc(o) && validLoc(d) && o != d
-		&& #pool < MAXPOOL % if pool free
-		&& sameWing(o, d)) % trip possible
-		-> request(o, d) . Dispatcher(ins(req(o, d, waiting), pool))
+		&& #pool < MAXPOOL) % if pool free
+		-> request_d(o, d) . Dispatcher(ins(newReq(o, d), pool))
 	% expose stops to a Car (offer handshake)
 	+ sum e: Car . stops_d(e, stopsOf(e, pool)) . Dispatcher(pool)
 	% update pool after a Car visits a stop
-	+ sum e: Car, n: Nat . visit_d(e, n) . Dispatcher(afterVisit(e, n, pool));
+	+ sum e: Car, n: Nat . visit_d(e, n) . Dispatcher(afterVisit(e, n, pool))
+	% report a finished request and remove it from the pool (cleanup)
+	+ sum o, d: Loc . (validLoc(o) && validLoc(d) && hasFinished(o, d, pool))
+		-> done(o, d) . Dispatcher(removeFinished(o, d, pool));
 
 % Elevator
 proc Elevator(e: Car, pos: Nat, dir: Dir) =
@@ -127,7 +146,7 @@ proc Elevator(e: Car, pos: Nat, dir: Dir) =
 		% select next target based on LOOK
 		((S != {}) -> Go(e, pos, newDir(pos, dir, S), target(pos, dir, S))
 		% no work: step off of I and release mutex
-		<> move(e, pos, moveOne(pos, dir)) . leaveI_c(e) . Elevator(e, moveOne(pos, dir), dir));
+		<> move_c(e, pos, moveOne(pos, dir)) . leaveI_c(e) . Elevator(e, moveOne(pos, dir), dir));
 		
 
 % Move to target floor
@@ -135,29 +154,40 @@ proc Go(e: Car, pos: Nat, dir: Dir, t: Nat) =
 	% if already on target, serve
 	(t == pos) -> Serve(e, pos, dir)
 	% not crossing intersection: simply move and serve
-	<> (!crossIntersection(pos, t)) -> move(e, pos, t) . Serve(e, t, dir)
+	<> (!crossIntersection(pos, t)) -> move_c(e, pos, t) . Serve(e, t, dir)
 	% stopping at intersection: have to seize mutex first
-	<> (t == 3) -> enterI_c(e) . move(e, pos, t) . Serve(e, t, dir)
+	<> (t == 3) -> enterI_c(e) . move_c(e, pos, t) . Serve(e, t, dir)
 	% leaving intersection: release mutex
-	<> (pos == 3) -> move(e, pos, t) . leaveI_c(e) . Serve(e, t, dir)
+	<> (pos == 3) -> move_c(e, pos, t) . leaveI_c(e) . Serve(e, t, dir)
 	% crossing intersection: seize, move, then release mutex
-	<> enterI_c(e) . move(e, pos, t) . leaveI_c(e) . Serve(e, t, dir);
+	<> enterI_c(e) . move_c(e, pos, t) . leaveI_c(e) . Serve(e, t, dir);
 
 % Serve a floor
 proc Serve(e: Car, pos: Nat, dir: Dir) =
 	% open doors, visit (offer handshake), close doors, restart loop
 	open(e) . visit_c(e, pos) . close(e) . Elevator(e, pos, dir);
 
+% Intersection Manager
 proc IntersectionManager(mutex: Mutex) =
 	% if free, allow any car to seize the mutex
 	(mutex == free) -> sum e: Car . enterI_im(e) . IntersectionManager(heldBy(e))
 	% else, wait for current owner to leave
 	<> leaveI_im(holder(mutex)) . IntersectionManager(free);
 
+% Emergency Switch on == true -> emergency
+proc EmergencySwitch(on: Bool) =
+	  (!on) -> emergency . EmergencySwitch(true) % only switch on if its off
+	+ (on) -> reset . EmergencySwitch(false) % reset the system
+	+ (!on) -> sum e: Car, f1, f2: Nat . move_em(e, f1, f2) . EmergencySwitch(on) % to move, must handshake
+	+ (!on) -> sum o, d: Loc . request_em(o, d) . EmergencySwitch(on) % to add request, must handshake
+	+ (!on) -> sum e: Car . enterI_em(e) . EmergencySwitch(on); % to enter intersection, must handshake
+
 % Compose with allow
-init allow({request, stops, visit, move, open, close, enterI, leaveI},
+init allow({request, stops, visit, move, open, close, enterI, leaveI, done, emergency, reset},
 	comm({stops_d | stops_c -> stops,
 		visit_d | visit_c -> visit,
-		enterI_c | enterI_im -> enterI,
-		leaveI_c | leaveI_im -> leaveI},
-	Dispatcher([]) || Elevator(A, 1, up) || Elevator(B, 1, up) || IntersectionManager(free)));
+		enterI_c | enterI_im | enterI_em -> enterI,
+		leaveI_c | leaveI_im -> leaveI,
+		move_c | move_em -> move,
+		request_d | request_em -> request},
+	Dispatcher([]) || Elevator(A, 1, up) || Elevator(B, 1, up) || IntersectionManager(free) || EmergencySwitch(false)));

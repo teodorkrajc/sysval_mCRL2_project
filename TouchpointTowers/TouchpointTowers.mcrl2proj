@@ -15,6 +15,15 @@
   <property>L2</property>
   <property>L3</property>
   <property>L4</property>
+  <property>R1</property>
+  <property>R2</property>
+  <property>R3</property>
+  <property>R4</property>
+  <property>R5</property>
+  <property>R6</property>
+  <property>R7</property>
+  <property>R8</property>
+  <property>R9</property>
  </properties>
  <jittyc>false</jittyc>
  <linearisation_method>regular</linearisation_method>
