@@ -62,7 +62,10 @@ The aim is to specify the controller in mCRL2 and verify collision prevention, d
 %%%   a car that is already serving a floor may finish (open, visit, close); doors are NOT opened by the emergency
 %%%   (would contradict S10); all state is preserved, so service resumes after reset.
 %%% ADD: the pool is bounded by MAXPOOL requests; a request is refused (not offered) while the pool is full.
-%%%   Say which value was verified and why (MAXPOOL = 1 feasible; MAXPOOL = 2 state space too large; see Verification).
+%%%   MAXPOOL = 1: full model verified directly. MAXPOOL = 2: verified via per-property abstraction (Verification).
+%%%   Why 2 matters: only from 2 on do stop sets have two levels (S9 is vacuous at 1) and do concurrent requests
+%%%   exist (stale stop sets, merging of identical requests, two busy cars at once).
+%%% OPEN (depends on the MAXPOOL = 2 run): the final verified bound per property.
 %%% ADD: a car serves its current floor if it has work there (no move); forbidding this would starve a passenger who
 %%%   requests at the car's current floor when there is no other work (L2 would fail).
 %%% ADD: no time, no capacities, no passenger identities (requests are trips (o,d), not people).
@@ -458,6 +461,10 @@ Following acquisition of Touchpoint I, the least fixed point requires the elevat
 %%% - S7, L3: `forall o, d: Loc` ranges over infinitely many locations (fl(A,17), ...). Bounded with validLoc;
 %%%   not a weakening because request/done only occur with valid locations.
 %%% - General lesson: quantifiers over infinite sorts at the top of a formula must be bounded or moved into the action.
+%%% - Not a formula change, but related: at MAXPOOL = 2, S7, L3 and L2 are checked once per origin P (9 instances of
+%%%   8 trips; their conjunction is the original formula; see Scaling to MAXPOOL = 2). For S7/L3 the validLoc bound
+%%%   becomes `o == P && validLoc(d)`; for L2 only the obligation guard becomes `val(!normal || !(o == P))`, because
+%%%   restricting L2's outer forall would stop following runs after other requests and weaken the formula.
 
 \subsection{Sanity Checks}
 \label{subsec:sanity-checks}
@@ -469,6 +476,10 @@ Following acquisition of Touchpoint I, the least fixed point requires the elevat
 %%%   R8 emergency, reset, then movement again (S8); R9 idle car steps off I (L4, idle rule).
 %%% - KEY OBSERVATION: R5 is FALSE at MAXPOOL = 1: with one request a stop set has at most one level, so S9
 %%%   ("never skip a stop") is vacuously true at MAXPOOL = 1. Discuss what this means for the verified bound.
+%%% - At MAXPOOL = 2, R5 is TRUE: stop sets with two levels occur, so S9 is meaningful there (and true).
+%%% - R4 and R9 require two actions directly after each other; minimisation does not preserve that, so they are only
+%%%   checked on the full MAXPOOL = 1 state space (both true there).
+%%% OPEN (depends on the MAXPOOL = 2 run): results of R1-R3 and R6-R8 at MAXPOOL = 2.
 
 \section{Behavioural Specification in mCRL2}
 \label{sec:behavioural-specification}
@@ -566,7 +577,7 @@ The full source file is maintained alongside the mCRL2 project. The intended spe
 
 \subsection{Setup and Reproducibility}
 \label{subsec:setup}
-%%% - Toolset: mCRL2 202607.0 (Release). Platform: Windows 11 Enterprise (10.0.26200). Machine: CPU/RAM if known.
+%%% - Toolset: mCRL2 202607.0 (Release). Platform: Windows 11 Enterprise (10.0.26200). Machine: 15.6 GB RAM (fill in the CPU model).
 %%% - Exact commands (PowerShell, from the repository root):
 %%%     mcrl22lps -v TouchpointTowers/TouchpointTowers_spec.mcrl2 out/model.lps
 %%%     lpssumelm -v out/model.lps out/model.lps
@@ -579,24 +590,69 @@ The full source file is maintained alongside the mCRL2 project. The intended spe
 %%% - Why this route: generate the state space once, reduce it modulo strong bisimulation (preserves every
 %%%   mu-calculus property), check all formulas against it. Much faster than on-the-fly checking per property
 %%%   in the IDE, which re-evaluates all data functions for every formula.
-%%% - Mention scripts/verify.sh once it exists.
+%%% - Scripts: scripts/verify.ps1 -MaxPool N runs the pipeline above on a copy of the spec with MAXPOOL = N;
+%%%   scripts/verify_reduced.ps1 runs the per-property abstraction (see Scaling to MAXPOOL = 2). Logs in out/mp<N>/.
+%%% - Reduced route, per group of properties:
+%%%     ltsconvert --tau=<actions the group does not mention> -e(dp)branching-bisim model_min.lts group.lts
+%%%     lts2pbes -l model.lps -f <prop>.mcf group.lts <prop>.pbes ;  pbessolve <prop>.pbes
 
 \subsection{State Space}
 \label{subsec:state-space}
 %%% - MAXPOOL = 1: 126,850 states, 332,630 transitions, generated in 7.2 s (4 threads);
 %%%   after strong-bisimulation reduction: 58,880 states, 158,208 transitions.
-%%% - MAXPOOL = 2: generation did not finish in reasonable time (give the last observed state count / time).
+%%% - MAXPOOL = 2: 27,258,226 states, 84,931,546 transitions, 25.4 min (4 threads); after strong-bisimulation
+%%%   reduction 18,822,336 states, 62,148,384 transitions (26.2 min). About 215x the MAXPOOL = 1 state space.
+%%% - The emergency switch exactly doubles the state space (63,425 without vs 126,850 with, MAXPOOL = 1).
 %%% - Why it grows: two independent cars (positions and phases multiply), 72 possible requests, the emergency switch
 %%%   (every situation exists with and without emergency), finished requests awaiting their done. Pools grow roughly
 %%%   like "choose up to MAXPOOL of all possible entries" (measured for the dispatcher alone in an early version:
 %%%   41 / 811 / 10,291 / 93,986 states for MAXPOOL 1-4).
 
+\subsection{Scaling to MAXPOOL = 2}
+\label{subsec:scaling}
+%%% GUIDE (new subsection): the investigation and its fix. Source: docs/design.md 6.3 and docs/results.md.
+%%% - Problem: the MAXPOOL = 2 state space was generated fine, but checking ran out of memory overnight
+%%%   (lts2pbes 1.9 h on S1 without a result; swapping on S2).
+%%% - Three hypotheses, each tested:
+%%%   (1) model bug / stale data: the linearised process resets unused parameters (stop set, target) to a dummy
+%%%       value; lpsstategraph removes nothing; the 27M states are genuine;
+%%%   (2) infinite unfolding in the formulas: all quantifiers bounded or inside actions, all fixpoint parameters
+%%%       finite; cost 2.5 (S1) to 11.7 (S9) equations per state;
+%%%   (3) checking method: measured at MAXPOOL = 1 and scaled: on-the-fly lps2pbes+pbessolve ~30 GB, lts2pbes route
+%%%       ~50 GB; PBES simplification (pbesconstelm, pbesparelm, pbesstategraph) has no effect.
+%%%   Conclusion: no bug; plain checking needs 2-3x the RAM of a 16 GB laptop.
+%%% - Options weighed, with the guideline 'reduce enough to fit, not maximally': model tweaks (-9% / +2%, rejected);
+%%%   leaving out the emergency for safety properties that do not mention it (sound: the switch only blocks
+%%%   behaviour; halves the state space; not needed); tau-confluence (6x fewer states for S9, single-threaded, slow);
+%%%   per-property abstraction (CHOSEN).
+%%% - Per-property abstraction: per group of properties, hide the actions they do not mention and minimise modulo
+%%%   branching bisimulation (divergence-preserving for L1, L2, L4). Sound because hidden actions are matched exactly
+%%%   like tau, and our formulas are insensitive to inserting/removing internal steps (a * between actions; S7/S10
+%%%   loop on 'any other action'). Hiding fewer actions than needed is still sound, so groups can share a run.
+%%% - Validation at MAXPOOL = 1: identical results; a mutant with the old L4 bug is still caught (L4 = false).
+%%% - Budget: 0.17 GB for checking 59k states, so aim for < ~1M states per checked state space.
+%%% - Second problem: the {request, done, emergency, reset} group reduced to 2.25M states, and S7/L2/L3 range over
+%%%   all 72 trips at once (12.6 GB, swapping). Fix: split the group (S7, L3 without emergency, plain branching)
+%%%   and check per origin (conjunction of 9 instances of 8 trips, ~1/9 of the memory each). First tried per trip
+%%%   (72 instances): correct but ~2.4 min each at MAXPOOL = 2, mostly loading the reduced LTS, so ~3 h per property.
+%%%   Validated at MAXPOOL = 1 (72/72 per trip, 9/9 per origin).
+%%% OPEN (depends on the MAXPOOL = 2 run): how long the per-origin runs took; whether any group had to be split further.
+
 \subsection{Results}
 \label{subsec:results}
-%%% - Table: property | result | time (from the step-5 run). S6: "by construction, not model-checked".
-%%% - Sanity checks R1-R9 with results; R5 false at MAXPOOL = 1 and what that means for S9.
+%%% - Table 1, MAXPOOL = 1, full model: all S/L properties true (S6 by construction, not model-checked);
+%%%   R1-R9 true except R5 (expected at this bound). Times 3-99 s each. Source: docs/results.md.
+%%% - Table 2, MAXPOOL = 2, per-property abstraction. Columns: property | group | reduced states | result | time.
+%%%   Known so far: S9, S10, R5 true (group {stops, move, open}, 1,100,116 states);
+%%%                 S1, S2 true (group {enterI, leaveI, move}, 722,572 states).
+%%% OPEN (depends on the MAXPOOL = 2 run): S3, S4, S5, S7, S8, L1, L2, L3, L4, R1-R3, R6-R8, the remaining group sizes, and timings.
+%%% - Coverage table: what each bound actually tests. MAXPOOL = 1: S3, S4, S8 fully; S1, S2, S5, S7, S10, L1-L4
+%%%   partially (no concurrent requests: no stale stop sets, no merging, never two busy cars); S9 vacuous.
+%%%   MAXPOOL = 2 covers the concurrent-request scenarios and makes S9 meaningful.
+%%% OPEN (depends on the MAXPOOL = 2 run): the final coverage statement.
 %%% - Problems found and fixed during development (shows the process): FSet enumeration failure after clustering;
-%%%   non-terminating S2/S7/L3 formulas; the L4 / enterI-during-emergency issue found by review.
+%%%   non-terminating S2/S7/L3 formulas; the L4 / enterI-during-emergency issue, found by review and later confirmed
+%%%   with a mutant (L4 = false when the gating is removed); MAXPOOL = 2 out of memory (next subsection).
 
 Verification is performed on the mCRL2 model associated with the documented source revision. For each requirement, the final report will provide the exact property file, the result, and reproducibility details (tool version, operating system, commands, and state-space size).
 
@@ -612,10 +668,17 @@ Verification is performed on the mCRL2 model associated with the documented sour
 %%% - How we worked: restarted the model from scratch with our own design after an AI-generated first draft;
 %%%   built it incrementally (one car -> two cars + intersection -> done + cross-wing -> emergency), testing each
 %%%   data function with mcrl2i before using it in a process.
+%%% - Verification decisions: generate the state space once and check against it; at MAXPOOL = 2 per-property
+%%%   abstraction grouped by alphabet, aiming at 'fits on a 16 GB laptop' (< ~1M states per check) rather than at
+%%%   maximal reduction; model tweaks measured and rejected as not worth it; per-origin checking for the formulas over all 72 trips.
 
 \subsection{Limitations}
 \label{subsec:limitations}
-%%% - Verified bound MAXPOOL = 1 only; S9 vacuous at that bound (R5). State what MAXPOOL = 2 would need.
+%%% - Bound: MAXPOOL = 1 on the full model; MAXPOOL = 2 via per-property abstraction; MAXPOOL >= 3 not attempted.
+%%% OPEN (depends on the MAXPOOL = 2 run): which properties are verified at which bound.
+%%% - The MAXPOOL = 2 results rely on the abstraction being sound for our (stutter-insensitive) formulas and on the
+%%%   tools; validated at MAXPOOL = 1 and with a mutant, not proven by us.
+%%% - R4 and R9 only at MAXPOOL = 1 (minimisation does not preserve 'directly after each other').
 %%% - No passenger identities: done names a trip (L2 weakness for repeated identical requests); S6 not model-checked.
 %%% - Liveness only under the "no further environment input" assumption (no fairness); no fairness between the cars
 %%%   for access to I.
@@ -627,13 +690,16 @@ Verification is performed on the mCRL2 model associated with the documented sour
 %%% - Bounded transfer area at I (dropped extension): expected deadlock (car at I waiting for space while the other
 %%%   car needs I to empty the area); how one would fix it.
 %%% - pickup/dropoff actions to verify S6; passenger identities.
-%%% - Fairness for access to I; state-space reduction techniques to reach MAXPOOL = 2 (symmetry, smaller request
-%%%   alphabet, compiled rewriter).
+%%% - Fairness for access to I.
+%%% - Larger bounds: symbolic tools (lpsreach / pbessolvesymbolic, not in the Windows build used), tau-confluence
+%%%   during generation (tested: 6x fewer states for S9 at MAXPOOL = 1), leaving out the emergency for safety
+%%%   properties, more RAM.
 
 \section{Conclusion}
 \label{sec:conclusion}
 %%% GUIDE (new section): what was built, what was verified (and at which bound), the two or three most important
 %%%   lessons. Half a page at most.
+%%% OPEN (depends on the MAXPOOL = 2 run): the sentence on what was verified at which bound.
 
 \section{Declaration of AI Use}
 \label{sec:ai-use}
@@ -641,6 +707,8 @@ Verification is performed on the mCRL2 model associated with the documented sour
 %%%   explanation of mCRL2 syntax, reviewing the group's model code, testing data functions, diagnosing tool problems,
 %%%   proposing formula revisions, recording design discussions, this report skeleton), and that all model code and
 %%%   report text were understood and written/checked by the group. Source: docs/ai-usage.md (dated log).
+%%%   Also: diagnosing the MAXPOOL = 2 memory problem (measurements, ruled-out hypotheses), proposing and validating
+%%%   per-property abstraction and per-origin checking, writing scripts/verify.ps1 and scripts/verify_reduced.ps1.
 
 \appendix
 \section{Full mCRL2 Specification}
@@ -650,6 +718,10 @@ Verification is performed on the mCRL2 model associated with the documented sour
 \section{Property Files}
 \label{app:properties}
 %%% GUIDE: all .mcf files (S1-S10, L1-L4, R1-R9) at the verified revision.
+
+\section{Verification Scripts}
+\label{app:scripts}
+%%% GUIDE: scripts/verify.ps1 and scripts/verify_reduced.ps1 (listing or summary; they contain the exact commands).
 
 
 

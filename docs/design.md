@@ -1,6 +1,8 @@
 # Touchpoint Towers (mCRL2 Project)
 
-Oct 6, 2026 · @teo
+Oct 6, 2026 · @teo · last updated Oct 25, 2026
+
+Sections 1–4 describe the design as it is now implemented in `TouchpointTowers/TouchpointTowers_spec.mcrl2`. Section 5 records formula changes, section 6 the reasoning behind design and verification decisions, section 7 the verification status.
 
 ## 1. System description
 
@@ -9,6 +11,8 @@ Two elevators, each confined to its own wing, share exactly one floor: the Touch
 **Story:** An architect designs two towers after Michelangelo's *Creation of Adam*: two figures reaching for each other. The wings lean together and meet at a single floor halfway up. Unlike in the painting, the fingers do touch, and two elevator rails now pass through the same point.
 
 ![Hand sketch: wings A and B, levels 1–5 each, rails meeting at I (level 3)](figures/layout-sketch.jpg)
+
+(The sketch file is not in the repository yet.)
 
 - Car A serves levels 1–5 of the left wing; car B serves levels 1–5 of the right wing.
 - Level 3 is Touchpoint I, shared by both. Cars pass through it to get between low and high levels.
@@ -20,8 +24,9 @@ Two elevators, each confined to its own wing, share exactly one floor: the Touch
 **Abstractions / Assumptions:**
 
 - Discrete levels; no time. A car jumps directly to its next stop in one atomic move.
-- Requests are (origin, destination) pairs; identical pairs merge.
-- The pending pool is bounded by a constant (5 legs); car and floor capacity are unbounded.
+- Requests are (origin, destination) pairs. Identical pool entries (same trip, same current leg, same state) merge; a request for a trip that is already under way stays a separate entry.
+- The pool is bounded by the constant `MAXPOOL` (number of requests; one entry per request for the whole trip). A request is refused while the pool is full. The original design bound was 5; verified are `MAXPOOL = 1` (full model) and `MAXPOOL = 2` (per-property abstraction, §6.11). Car and floor capacity are unbounded.
+- No passenger identities: the model tracks trips, not people.
 - The number of levels is constant.
 
 **Challenge:**
@@ -30,56 +35,60 @@ Two elevators, each confined to its own wing, share exactly one floor: the Touch
 - **Shared resource:** I is a mutex, held briefly when passing and longer when stopping.
 - **Handoff:** leg 2 may only start after leg 1 has dropped its passenger at I.
 - **Bookkeeping vs. scheduling:** one stop can activate and complete several requests at once, while each car chooses its own visiting order.
-- **Expected failure modes:** a car idling at I starves the other; deadlocks around I once transfer capacity is bounded.
+- **Expected failure modes:** a car idling at I starves the other (prevented by the idle rule, §6.7); deadlocks around I once transfer capacity is bounded (that extension was dropped; floor area at I is unbounded).
 
 ## 2. Components
 
 ```mermaid
 flowchart TB
-    Env["Environment<br/>passengers, emergency button"]
-    subgraph Controller["Controller: four parallel processes"]
-        D["Dispatcher<br/>pool of legs: blocked, waiting, active"]
+    Env["Environment<br/>passengers"]
+    subgraph Controller["Five parallel processes"]
+        D["Dispatcher<br/>pool of requests: waiting, active, finished"]
         CA["Car A<br/>left wing, levels 1–5"]
         CB["Car B<br/>right wing, levels 1–5"]
-        IM["Intersection manager<br/>owner of I: none, A or B"]
+        IM["Intersection manager<br/>I: free or held by A / B"]
+        ES["Emergency switch<br/>on / off (the button)"]
     end
     Env -->|"request(o, d)"| D
     D <-->|"stops, visit"| CA
     D <-->|"stops, visit"| CB
     CA <-->|"enterI, leaveI"| IM
     CB <-->|"enterI, leaveI"| IM
-    Env -.->|"emergency, reset"| CA
-    Env -.->|"emergency, reset"| CB
+    ES -.->|"gates move"| CA
+    ES -.->|"gates move"| CB
+    ES -.->|"gates request"| D
+    ES -.->|"gates enterI"| IM
 ```
 
-The cars never talk to each other directly: all coordination runs through the dispatcher (work) and the intersection manager (I). Communication between the dispatcher and the intersection manager might become necessary.
+The cars never talk to each other directly: all coordination runs through the dispatcher (work) and the intersection manager (I). The dispatcher and the intersection manager do not need to communicate. The emergency switch plays the role of the emergency button; it takes part in every `move`, `request` and `enterI` and allows them only while no emergency is active. Whether it counts as part of the controller or of the environment is a presentation choice; without it the controller still has four components.
 
 | Component | State | Responsibility |
 | --- | --- | --- |
-| Dispatcher | Pool of legs (o, d, state), state ∈ {blocked, waiting, active} | Tells each car its stop set. On a visit: waiting legs with that origin → active; active legs with that destination → completed; completing leg 1 unblocks leg 2. |
-| Car A, Car B (one process, parameter e) | Level, direction, doors | Reads its stop set, picks the next level (LOOK schedule), moves multiple levels at a time, opens and closes doors, reports visits. Acquires the I mutex before entering level 3; releases it after leaving. |
-| Intersection manager | Owner of I ∈ {none, A, B} | Grants the I mutex to at most one car; frees it on release. |
-| Environment | — | Issues requests; presses emergency and reset. |
+| Dispatcher | Pool: sorted, duplicate-free list of `req(origSrc, origDst, src, dst, st)` with st ∈ {waiting, active, finished} (§6.1, §6.3) | Accepts requests while the pool is not full; offers each car its stop set; on `visit(e, n)`: e's waiting entries starting at n become active, e's active entries ending at n become finished (home) or are rewritten into their second leg at I; reports `done(o, d)` for finished entries and removes them. |
+| Car A, Car B (one process, parameter e) | Level, direction; phase (read / move / serve) and target | Reads its stop set (waits while it has no work, §6.5), picks the next level with LOOK (serving the current level if it has work there), moves in one atomic jump, opens, reports the visit, closes. Follows the intersection protocol (§6.6) and the idle rule at I (§6.7). |
+| Intersection manager | `free` or `heldBy(e)` | Grants I to at most one car; only the holder can release it. |
+| Emergency switch | on / off | `emergency` / `reset`; while on, no `move`, `request` or `enterI` can happen (§6.9). |
+| Environment | — | Issues requests (and presses the emergency button, modelled by the switch). |
 
-Stop set of car e = origins of its waiting legs ∪ destinations of its active legs. Blocked legs contribute nothing, so no car visits I for a passenger who has not arrived yet.
+Stop set of car e = levels of the `src` of its waiting entries ∪ levels of the `dst` (current leg) of its active entries. Finished entries contribute nothing. The second leg of a cross-wing trip only exists once the passenger is at I, so no car visits I for a passenger who has not arrived yet (§6.1).
 
 ## 3. Actions
 
-Locations are `Loc = struct I | fl(w: Car, n: Nat)` with n ∈ {1, 2, 4, 5}; a car's position is a level 1–5, where 3 is I.
+Locations are `Loc = struct I | fl(wing: Car, lvl: Nat)` with lvl ∈ {1, 2, 4, 5}; a car's position is a level 1–5, where 3 is I. Synchronised actions are built from halves with suffixes (`_d` dispatcher, `_c` car, `_im` intersection manager, `_em` emergency switch), fused by `comm` into the unsuffixed action below; `allow` only lets the fused actions through, so a half can never happen alone.
 
 | Action | Parameters | Between | Meaning |
 | --- | --- | --- | --- |
-| `request(o, d)` | o, d: Loc, o ≠ d | Env → Dispatcher | A passenger at o asks to travel to d. |
+| `request(o, d)` | o, d: Loc, o ≠ d | Env → Dispatcher, gated by the switch | A passenger at o asks to travel to d (refused while the pool is full or during an emergency). |
 | `stops(e, S)` | e: Car, S: FSet(Nat) | Dispatcher ↔ Car e | Car e reads the levels it must visit. |
-| `move(e, f1, f2)` | e: Car, f1, f2: Nat | Car e | Car e moves from level f1 to level f2. |
-| `enterI(e)` | e: Car | Car e ↔ Intersection mgr | Car e is granted I; precedes crossing or entering moves. |
+| `move(e, f1, f2)` | e: Car, f1, f2: Nat | Car e, gated by the switch | Car e moves from level f1 to level f2. |
+| `enterI(e)` | e: Car | Car e ↔ Intersection mgr ↔ switch | Car e is granted I; precedes crossing or entering moves. Three-party: no new grants during an emergency. |
 | `leaveI(e)` | e: Car | Car e ↔ Intersection mgr | Car e has moved off or through level 3 and releases I. |
 | `open(e)`, `close(e)` | e: Car | Car e | Doors of car e open / close. |
 | `visit(e, n)` | e: Car, n: Nat | Car e ↔ Dispatcher | Car e serves level n with doors open; the dispatcher updates the pool. |
-| `pickup(e, o, d)` | e: Car, o, d: Loc | Dispatcher | Leg (o, d) becomes active: its passenger boards car e. |
-| `dropoff(e, o, d)` | e: Car, o, d: Loc | Dispatcher | Leg (o, d) completes: its passenger leaves car e. |
 | `done(o, d)` | o, d: Loc | Dispatcher | The original request (o, d) is complete (after its last leg). |
-| `emergency`, `reset` | — | Env ↔ Car A ↔ Car B | Emergency stop starts / ends; both cars receive it at once. |
+| `emergency`, `reset` | — | Emergency switch | Emergency starts / ends. |
+
+`pickup(e, o, d)` and `dropoff(e, o, d)` were part of the first design but are not modelled: boarding and alighting happen inside the dispatcher's pool update on `visit`. Consequence for S6: see §4 and §6.1.
 
 ## 4. Requirements
 
@@ -92,7 +101,7 @@ Locations are `Loc = struct I | fl(w: Car, n: Nat)` with n ∈ {1, 2, 4, 5}; a c
 | S3 | A car never moves with open doors. | After `open(e)`, no `move(e, _, _)` before `close(e)`. |
 | S4 | Service only happens with open doors. | `visit(e, n)` only occurs between `open(e)` and `close(e)`. |
 | S5 | A car only serves levels where it has work. | After `stops(e, S)`, no `visit(e, n)` with n ∉ S before the next `stops(e, _)`. |
-| S6 | Transfer passengers are handed over in order. | For a cross-wing request, `pickup(e₂, I, d)` never occurs before `dropoff(e₁, o, I)`. |
+| S6 | Transfer passengers are handed over in order. | For a cross-wing request, `pickup(e₂, I, d)` never occurs before `dropoff(e₁, o, I)`. **Not model-checked**: holds by construction (the second leg is created only when the first car drops the passenger at I, §6.1); `pickup`/`dropoff` are not modelled and there are no passenger identities. |
 | S7 | No phantom completions. | `done(o, d)` only occurs after `request(o, d)` with no `done(o, d)` in between. |
 | S8 | Emergency stops both cars. | After `emergency`, no `move(e, _, _)` before `reset`. |
 | S9 | A car never skips work. | After `stops(e, S)`, no `move(e, f1, f2)` has a level of S strictly between f1 and f2, before the next `stops(e, _)`. |
@@ -103,15 +112,34 @@ Locations are `Loc = struct I | fl(w: Car, n: Nat)` with n ∈ {1, 2, 4, 5}; a c
 | ID | Requirement | In terms of actions |
 | --- | --- | --- |
 | L1 | No deadlock. | `[true*]<true>true` |
-| L2 | Every request is served. | After `request(o, d)`, `done(o, d)` inevitably follows on every path without further `request`, `emergency` or `reset`. |
+| L2 | Every request is served. | After `request(o, d)` made outside an emergency, `done(o, d)` inevitably follows on every path without further `request`, `emergency` or `reset`. |
 | L3 | A request always remains servable. | After `request(o, d)`, `done(o, d)` stays reachable until it occurs. |
 | L4 | No car parks at I. | After `enterI(e)`, `leaveI(e)` inevitably follows, under the same assumption as L2. |
 
-### Scheduling (TBD)
+### Scheduling (not formalised)
 
 | ID | Requirement | In terms of actions |
 | --- | --- | --- |
 | P1 | LOOK: a car never reverses while work lies ahead. | A move is up if f2 > f1, else down. After `stops(e, S)`, a move against the previous direction only occurs when S has no level ahead in that direction. |
+
+LOOK is implemented in the model (`target`, `newDir`), but P1 was never written as a formula; it is not part of the verified requirements.
+
+### Sanity checks
+
+A safety formula `[…] false` is also true if its actions never happen. Each property is backed by a reachability formula `<…> true` (files `R1`–`R9`) showing that its scenario actually occurs:
+
+| ID | Formula | Supports |
+| --- | --- | --- |
+| R1, R2 | `<true* . enterI(A)> true`, same for B | S1, S2, L4 |
+| R3 | `<true* . move(A, 2, 4)> true` (crossing I) | S2 |
+| R4 | `<true* . open(A) . visit(A, 5)> true` | S3, S4, S10 |
+| R5 | `<true* . stops(A, {1, 5})> true` (two-level stop set) | S5, S9 |
+| R6 | `<true* . done(fl(A, 1), fl(A, 5))> true` | S7, L2, L3 |
+| R7 | `<true* . done(fl(A, 1), fl(B, 4))> true` (cross-wing) | S6, L2, L3 |
+| R8 | `<true* . emergency . (!reset)* . reset . true* . exists f1, f2: Nat . move(A, f1, f2)> true` | S8 |
+| R9 | `<true* . stops(A, {}) . move(A, 3, 4)> true` (idle rule) | L4 |
+
+R5 is false at `MAXPOOL = 1`: with one request a stop set has at most one level, so S9 is vacuous there. At `MAXPOOL = 2` R5 is true.
 
 ## 5. Formula revisions
 
@@ -208,7 +236,11 @@ forall o,d: Loc .
 
 **Revised:** `forall o, d: Loc . val(validLoc(o) && validLoc(d)) => …`, rest unchanged. Not a weakening, for the same reason as S7.
 
-**Possibly also L2:** L2 quantifies `forall o,d: Loc` too, but directly in front of `[request(o,d)]`, inside the outer fixpoint. Whether the solver can eliminate that quantifier on its own is untested. If L2 does not terminate, add the same bound.
+**L2 needed no bound:** L2 quantifies `forall o,d: Loc` directly in front of `[request(o,d)]`, inside the outer fixpoint; the solver eliminates it by matching the action. L2 terminated at `MAXPOOL = 1` (14.6 s) unchanged. At `MAXPOOL = 2` it is checked per origin (§6.11), which is a verification technique, not a change of the formula.
+
+### S6: commented out (2026-10-21)
+
+The draft `S6.mcf` used `request(i, o, d)` with a request ID and `pickup`/`dropoff` actions, none of which exist in the model. Decision: S6 holds by construction (§6.1) and is not model-checked. The file now contains only comments: the reasoning and the original draft.
 
 ## 6. Design decisions
 
@@ -260,7 +292,7 @@ Resulting entry: `req(origSrc, origDst, src, dst, st)`. A new request is created
 | B visits I | `(1A, 4B, I, 4B, active)` | B, drop off at 4 |
 | B visits 4 | `(1A, 4B, I, 4B, finished)` | reported as `done(1A, 4B)` |
 
-**Consequence for the report.** Assumption 3 of the first draft ("leg 2 stays blocked until…") must be rewritten: the second leg is created when the passenger arrives at I. The S6 formula needs a fresh look (open), since the first draft assumed request IDs and blocked legs.
+**Consequence for the report.** Assumption 3 of the first draft ("leg 2 stays blocked until…") must be rewritten: the second leg is created when the passenger arrives at I. S6 is argued by construction and not model-checked (decided 2026-10-21; §5).
 
 ### 6.2 Completion reporting: `done` (2026-10-20)
 
@@ -275,4 +307,109 @@ Resulting entry: `req(origSrc, origDst, src, dst, st)`. A new request is created
 
 **Why a branch, not a mode.** Reporting is one more `+` branch of the dispatcher, offered whenever a finished request exists, rather than a separate clean-up phase. A phase would block requests and visits until clean-up is over. A branch can interleave with everything else, and since only the dispatcher takes part, it can never block another component.
 
-**Why sum over locations.** The branch is `sum o, d: Loc . (validLoc(o) && validLoc(d) && isFinished(o, d, pool)) -> done(o, d) . …` rather than a sum over pool entries. The tools must enumerate every `sum`, and sums over `Loc` with `validLoc` guards are known to work (the request branch uses the same pattern).
+**Why sum over locations.** The branch is `sum o, d: Loc . (validLoc(o) && validLoc(d) && hasFinished(o, d, pool)) -> done(o, d) . Dispatcher(removeFinished(o, d, pool))` rather than a sum over pool entries. The tools must enumerate every `sum`, and sums over `Loc` with `validLoc` guards are known to work (the request branch uses the same pattern).
+
+### 6.3 Pool as a sorted list (2026-10-08)
+
+The pool is a `List(Req)` kept sorted and duplicate-free by `ins`, not an `FSet`. mCRL2 cannot pattern-match on `FSet` (tested: a recursive function over `{x} + s` never evaluates), so the recursive functions the dispatcher needs (`stopsOf`, `afterVisit`, `hasFinished`, `removeFinished`) cannot be written over a set. A plain list would make `[x, y]` and `[y, x]` different states for the same pool; keeping it sorted (with the `<` that mCRL2 generates for every struct) makes it canonical. Stop sets stay `FSet(Nat)`, since they only need membership tests (`n in S`).
+
+### 6.4 Dispatcher without phases (2026-10-13)
+
+The first idea was a cycle: bookkeeping → send car A its stops → send car B its stops → wait. With blocking handshakes this deadlocks: the dispatcher waits for car B to take its stops while car B waits for the dispatcher to accept its `visit`. Instead, all branches (request, offer stops, accept visit, report done) are always offered with `+`; the bookkeeping is simply the new parameter value of each transition. The stop set is computed (`stopsOf(e, pool)`) whenever a car reads it, so it is always up to date.
+
+### 6.5 Cars pull their stop set and wait when idle (2026-10-13)
+
+A car reads its stop set with `sum S: FSet(Nat) . (S != {} || pos == 3) -> stops_c(e, S)`: the handshake fixes `S` to the dispatcher's offer. The guard `S != {}` makes a car without work *wait* instead of reading an empty set again and again; such polling would be an infinite loop of `stops` actions (a livelock) and would break the "inevitably" in L2 and L4. A car reads its stop set once per cycle (read → move → open → visit → close → read).
+
+**Serving the current level is allowed.** If the car's current level is in its stop set, it serves it without moving. Forbidding this would starve a passenger who requests at the car's level when there is no other work (L2 would fail). It cannot livelock: a visit always removes that level from the stop set, unless the environment keeps making new requests there, which L2's assumption excludes.
+
+**LOOK.** `target(pos, dir, S)`: the current level if it has work, otherwise the nearest stop ahead in the current direction, otherwise the nearest stop behind (reverse). `newDir` gives the matching direction. `nextUp`/`nextDown` scan level by level and return 0 for "none".
+
+**Conditional equations.** `nextUp`/`nextDown` are defined with conditional equations (`n < 5 -> nextUp(n, S) = …`), not with `if(…)`. With `if`, `mcrl22lps` looped forever: during linearisation the position is still a variable, the stopping condition `n >= 5` cannot be decided, and the rewriter unfolds `nextUp(n + 1, S)`, `nextUp(n + 2, S)`, … endlessly. A conditional equation only fires once its condition is decidable. Demonstrated with `mcrl2i` (the `if` version hangs on an unknown argument; the conditional version returns it unevaluated).
+
+### 6.6 Intersection protocol (2026-10-20)
+
+Observation: a car holds I exactly when it is at level 3, or inside its own crossing move. This avoids an extra flag. A move from `pos` to `t`:
+
+| Move | Sequence |
+| --- | --- |
+| does not touch 3 | `move` |
+| arrives at 3 | `enterI . move` (keep I while serving) |
+| leaves 3 | `move . leaveI` |
+| passes through 3 | `enterI . move . leaveI` |
+
+Written as an if-else chain in `Go`; checked strongly bisimilar (with `ltscompare`) to an equivalent two-question version ("need to enter?" / "need to leave?"). The intersection manager is two lines: when free, any car may `enterI`; when held, only the holder may `leaveI`.
+
+### 6.7 Idle rule at I (2026-10-20)
+
+A car without work blocks (§6.5). If it blocks at level 3, it holds I forever and starves the other car (L4 fails). Rule: a car at level 3 reads its stop set even when it is empty, and with `{}` moves one level on in its current direction (`moveOne`: up → 4, down → 2), then releases I. It does not open its doors: that would violate S10 (doors only open where there is work), and a `visit` there would violate S5. The car still reads the empty set first (a real handshake), so it never leaves I while a passenger is waiting there.
+
+### 6.8 Linearisation pitfall: two `stops_c` branches (2026-10-21)
+
+The work branch and the idle branch were first written as two separate `stops_c` summands. The linearizer clustered them into one summand with an `if`, after which `lpssumelm` could no longer eliminate `sum S: FSet(Nat)`, and state space generation failed with "Cannot enumerate elements of finite set sort FSet(Nat)" (the property checker kept trying forever). Fix: one `stops_c` branch with an inner if-then-else (`(S != {}) -> Go(…) <> move_c(…) . leaveI_c(e) . …`).
+
+### 6.9 Emergency as a pause (2026-10-21)
+
+**Goal:** an emergency pauses the system and does not reset it; if it discarded requests, "every request is eventually served" would be false. All state is preserved and the system continues after `reset`.
+
+**Design:** a fifth process, the emergency switch (on/off), plays the button. `move`, `request` and `enterI` must synchronise with it, and it only allows them while off. Everything else (stop-set reads, visits, `done`, the intersection manager) is bookkeeping and continues; a car that is serving a floor may finish (open, visit, close). Moves are atomic, so there is no "mid-move" to interrupt. Doors are not opened by the emergency, because that would contradict S10. Compared with the first design (both cars synchronise on `emergency`/`reset`), the cars barely change: `move` became a half that needs the switch.
+
+**`enterI` gating found by review:** the first version gated only `move` and `request`. Reviewing L4 before running it showed that a car could acquire I during an emergency and then be unable to move; L4 ("`leaveI` inevitably follows", excluding paths through an emergency) then fails, because that `enterI` happens *after* the emergency started. Fix: `enterI` became a three-party synchronisation with the switch. Later confirmed with a mutant: without the gating, L4 = false.
+
+**Requests during an emergency** are impossible (the switch blocks them), which resolves the "emergency vs. L2" pitfall; L2's `normal` flag would also cover it.
+
+### 6.10 Sanity checks (2026-10-21)
+
+Every safety property is backed by a reachability check (§4, R1–R9), because a safety formula over actions that never happen is vacuously true. R5 revealed that S9 is vacuous at `MAXPOOL = 1`: with one request a stop set never has two levels, so there is nothing to skip. This, together with scenarios that need two requests at once (stale stop sets, merging, two busy cars), is why verification at `MAXPOOL = 2` mattered (§6.11).
+
+### 6.11 Verification at MAXPOOL = 2: diagnosis and per-property abstraction (2026-10-25)
+
+**Problem.** At `MAXPOOL = 1` the full model was verified, but there S9 is vacuous (a stop set never has two levels; sanity check R5 is false), and scenarios with two requests at once (stale stop sets, merging, two busy cars) do not occur. At `MAXPOOL = 2` the state space was generated without trouble (27.3M states, 25 min; 18.8M after strong-bisimulation reduction), but checking ran out of memory overnight: `lts2pbes` ran 1.9 h on S1 without a result, and on S2 the system was swapping (9.8 GB peak, 0.3 GB free).
+
+**Hypotheses investigated** (following the tutor's hints: a model bug, infinite unfolding in a formula, or the checking method):
+1. *Model bug / redundant state.* Checked whether the stop set `S` and the target `t`, which a car only needs briefly, stay in the state as stale values. They do not: the linearised process resets them to a dummy value, and `lpsstategraph` (dead-variable analysis) removes nothing. The 27M states are genuine. They come from pool combinations (about 280 possible pool entries), two independently moving cars, and the emergency switch, which exactly doubles the state space (63,425 vs 126,850 states at `MAXPOOL = 1`).
+2. *Infinite unfolding in the formulas.* Every formula reviewed: all quantifiers are bounded (`validLoc`, `n` in 1..5), inside an action, or directly in front of a box with that action (eliminated by matching); all fixpoint parameters are finite. The non-terminating formulas found earlier (S2, S7, L3) were already fixed (section 5). Measured cost: 2.5 equations per state for S1, 11.7 for S9 (`forall e` × `forall n` = 10 instances).
+3. *Checking method.* Memory measured at `MAXPOOL = 1` and scaled up: the on-the-fly route (`lps2pbes` + `pbessolve`) would need about 30 GB, the route used (`lts2pbes` on the LTS) about 50 GB, because it first builds an explicit equation system per state and then solves it. PBES simplification (`pbesconstelm`, `pbesparelm`, `pbesstategraph`) changed nothing (S1, S9), since every state variable influences behaviour.
+
+**Conclusion:** no bug. Plain checking at 27M states needs 2–3× the RAM of a 16 GB laptop.
+
+**Options considered.** The guideline was to reduce *enough* to run on the laptop, not as much as possible.
+- *Model changes:* a car storing only target and a park flag instead of its stop set (−9% at `MAXPOOL = 1`); reporting `done` immediately after a visit (+2%). Not worth changing the model for.
+- *Leaving out the emergency* for safety properties that do not mention it: sound, because the switch only blocks behaviour and never adds any (every run of the full model with `emergency`/`reset` removed is a run of the emergency-free model). Halves the state space; kept as an argument, not needed in the end.
+- *Tau-confluence* (`lpsconfcheck`, then `lps2lts -cctau`): reduces during generation (6× fewer states for S9 at `MAXPOOL = 1`), but only works single-threaded and is slow at `MAXPOOL = 2`. Not used.
+- **Per-property abstraction (chosen):** for each group of properties, hide the actions their formulas do not mention (they become internal `tau` steps), minimise modulo branching bisimulation (divergence-preserving for the liveness properties L1, L2, L4, where infinite internal loops matter), and check on the result.
+
+**Why it is sound.** Hiding only renames actions that a formula never mentions; the formula treats them exactly like `tau` (they are matched by `true` or by a negation). Branching bisimulation preserves every formula that is insensitive to inserting or removing internal steps; ours are, because their regular expressions always put a `*` between actions and S7/S10 loop on "any other action". Hiding a few actions *fewer* than a formula needs is still sound (just less reduction), which lets properties share one reduction run. Exception: the sanity checks R4 and R9 require two actions directly after each other, so they are taken from the full `MAXPOOL = 1` run only.
+
+**Validation** (`MAXPOOL = 1`):
+- every property gives the same result on its reduced state space as on the full one;
+- a mutant with the old L4 bug (`enterI` not gated by the emergency switch) is still caught: L4 = false on the full and on the reduced state space.
+
+**Balance.** From the `MAXPOOL = 1` measurements (0.17 GB for checking 59k states), each checked state space should stay below about 1M states. Properties were grouped by the actions they mention, giving 8–9 reduction runs on the existing 18.8M-state LTS instead of 13 (`scripts/verify_reduced.ps1`).
+
+**First `MAXPOOL = 2` results.** Each reduction took about 4 minutes.
+- {stops, move, open} → 1.1M states: **S9, S10, R5 true**. R5 = true means S9 is no longer vacuous.
+- {enterI, leaveI, move} → 0.72M states: **S1, S2 true**.
+
+**Second problem: formulas over all 72 trips.** The group {request, done, emergency, reset} reduced to 2.25M states, much more than estimated, because which requests are outstanding has to stay visible. S7, L2 and L3 quantify over all 72 trips `(o, d)`, so the solver works on 72 instances at once: 12.6 GB committed, swapping. Stopped.
+
+**Fix.**
+- *Split the group:* S7, L3 (and R6, R7) do not mention emergency/reset and are safety/reachability properties, so they use the smaller plain branching reduction of {request, done}. Only L2 keeps {request, done, emergency, reset} with the divergence-preserving variant.
+- *Per-trip checking:* a formula "for all trips (o, d): φ(o, d)" is true iff φ(P, Q) holds for each of the 72 trips. Each instance needs about 1/72 of the memory; the total work is the same. Instances are made by a textual change of the formula file:
+  - S7, L3: the bound `val(validLoc(o) && validLoc(d))` becomes `val(o == P && d == Q)`.
+  - L2: the obligation guard `val(!normal)` becomes `val(!normal || !(o == P && d == Q))`. Only the "inevitably `done`" obligation is restricted to trip (P, Q); the outer loop over all requests, emergencies and resets is unchanged. (Restricting the outer `forall` itself would stop following runs after requests for other trips, which would weaken the formula.)
+- Validated at `MAXPOOL = 1`: S7, L3 and L2 are each true for 72 of 72 trips, matching the single-formula results.
+- *Per trip was too slow; per origin instead.* At `MAXPOOL = 2` each per-trip check took ~2.4 min (1,751 s for the first 12 trips), almost all of it spent loading the 653k-state reduced LTS, so 72 checks per property would have taken ~3 h. Grouping the trips by origin gives 9 instances of 8 trips each: still a conjunction equal to the original formula, ~1/9 of the all-at-once memory, and 8× less loading overhead. Instances: S7, L3: `val(validLoc(o) && validLoc(d))` becomes `val(o == P && validLoc(d))`; L2: `val(!normal)` becomes `val(!normal || !(o == P))`. Validated at `MAXPOOL = 1` (9 of 9 true for each). The fast groups were moved before the request groups so their results come in first.
+
+**Per-origin timings at `MAXPOOL = 2`:** about 8 min per origin for S7 (solving now dominates, not loading).
+
+## 7. Verification status (2026-10-25, 20:00)
+
+Details, timings and commands: `docs/results.md`. Scripts: `scripts/verify.ps1` (full pipeline), `scripts/verify_reduced.ps1` (per-property abstraction).
+
+| Bound | Method | Result |
+| --- | --- | --- |
+| `MAXPOOL = 1` (126,850 states) | full state space | all S/L properties true (S6 by construction); R1–R9 true except R5 (expected) |
+| `MAXPOOL = 2` (27.3M states) | per-property abstraction | true so far: S1, S2, S3, S4, S5, S8, S9, S10, L1, L4, R1, R2, R3, R5, R6, R7, R8. Running: S7, L3, L2 (per origin) |
+
+Not covered at `MAXPOOL = 2`: S6 (by construction, any bound), R4 and R9 (minimisation does not preserve "directly after each other"; true at `MAXPOOL = 1`).

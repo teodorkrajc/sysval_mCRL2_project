@@ -1,142 +1,74 @@
 # AGENTS.md — Touchpoint Towers (mCRL2)
 
-Onboarding for an AI agent working in this repository. Read this file fully, then `docs/design.md`, before changing anything.
+Onboarding for an AI agent working in this repository. Read this file fully, then `docs/design.md` (design + all decisions), `docs/results.md` (verification results) and `docs/report.tex` (the report, with `%%%` guidance comments). Last updated 2026-10-25.
 
 ## 1. What this project is
 
-The System Validation (2IMF30, TU/e) course assignment. We design the controller for a small distributed system in **mCRL2**, state its requirements as **modal µ-calculus** formulas, and verify them with the mCRL2 toolset. Implementation is explicitly out of scope; the deliverable is a verified *model* plus a technical report.
+The System Validation (2IMF30, TU/e) course assignment. We design the controller for a small distributed system in **mCRL2**, state its requirements as **modal µ-calculus** formulas, and verify them with the mCRL2 toolset. The deliverable is a verified *model* plus a technical report.
 
 The system: two elevators in two wings (A left, B right), levels 1–5 each, whose rails meet at one shared floor, the Touchpoint **I** (level 3). I is a mutex and the only transfer point between wings. Cross-wing trips are split into two legs via I.
 
-**Source of truth for the design:** `docs/design.md` (system description, components, action table, requirements S1–S10, L1–L4, P1). If code and design disagree, stop and flag it; don't silently pick one.
+**Source of truth for the design:** `docs/design.md`. If the model and design.md disagree, stop and flag it.
 
 ## 2. Hard constraints from the course
 
-- **Deadlines:** pre-final report on paper before **Mon 26 Oct 2026, 09:00** (this is the one that is graded). Exam Fri 30 Oct. Final report Mon 9 Nov, 12:00.
-- The controller must have **at least three parallel components**. Ours has four: Dispatcher, Car A, Car B, Intersection manager. Don't merge them.
-- The report must list the **exact commands** used, the **toolset version**, and the **platform/OS**. Every verification run must be reproducible from `scripts/verify.sh`.
-- **AI use must be declared in the report**, and every group member must understand everything in it. Log your contributions in `docs/ai-usage.md` (date, what you did, which files). Don't write report prose unless asked; the report must be the group's own writing.
+- **Deadlines:** pre-final report on paper before **Mon 26 Oct 2026, 09:00** (graded). Exam Fri 30 Oct. Final report Mon 9 Nov, 12:00.
+- The controller must have at least three parallel components (we have five processes; four without the emergency switch).
+- The report must list the **exact commands**, the **toolset version** (mCRL2 202607.0) and the **platform** (Windows 11). Commands are in `scripts/verify.ps1` and `scripts/verify_reduced.ps1`.
+- **AI use must be declared in the report**, and every group member must understand everything in it. Log AI contributions in `docs/ai-usage.md` (date, what, files).
 
-## 3. Repository layout
+## 3. Working with the user (important)
 
-Create missing pieces in this layout; don't invent a different one.
+- **The user writes the report prose themselves.** Never insert report prose into `report.tex`. Your job there: `%%%` comment skeletons (what a section must contain), `%%% FIX:` markers where existing text contradicts the model, and answering questions. Items that depended on the MAXPOOL = 2 run are marked `%%% OPEN (depends on the MAXPOOL = 2 run):`.
+- **The user wants to understand everything.** Explain step by step, give the reasoning behind each construct and decision, show evidence (tool output) rather than assertions, and leave decisions to the user.
+- **State coverage gaps up front, unprompted.** With every bound, abstraction or results table, say what is vacuous or untested (e.g. S9 is vacuous at MAXPOOL = 1).
+- **Long verification runs:** the user prefers to run them in their own terminal or the mCRL2 IDE. Ask before starting anything long; short checks (typecheck, `mcrl2i`, small experiments on scratch copies) are fine.
+- Be terse when asked for something pasteable.
 
-```
-TouchpointTowers/TouchpointTowers_spec.mcrl2   # the specification (one file; mCRL2 IDE project in the same folder)
-properties/<ID>_<name>.mcf # one formula per requirement, e.g. S1_mutex.mcf
-properties/sanity/*.mcf    # reachability/vacuity checks (see §7)
-scripts/verify.sh          # full pipeline: linearise, state space, all properties
-docs/design.md             # design document (source of truth)
-docs/figures/              # sketches, diagrams
-docs/ai-usage.md           # AI contribution log
-docs/results.md            # table: property × configuration → result, state counts
-out/                       # generated files (gitignored)
-```
-
-## 4. Model conventions
-
-**Data**
+## 4. Repository layout
 
 ```
-sort Car      = struct A | B;
-     Loc      = struct I | fl(wing: Car, lvl: Nat);  % lvl ∈ {1, 2, 4, 5}; I is level 3
-     LegState = struct blocked | waiting | active;
-     Leg      = struct leg(ro: Loc, rd: Loc, src: Loc, dst: Loc, st: LegState);
-     Pool     = List(Leg);                           % sorted, duplicate-free
+TouchpointTowers/TouchpointTowers_spec.mcrl2   the model (one file)
+TouchpointTowers/TouchpointTowers.mcrl2proj    mCRL2 IDE project (lists the properties)
+TouchpointTowers/properties/S1..S10, L1..L4    requirement formulas (.mcf); S6 is comments only (by construction)
+TouchpointTowers/properties/R1..R9             sanity (reachability) checks
+scripts/verify.ps1                             full pipeline: linearise, state space, strong reduction, all properties
+scripts/verify_reduced.ps1                     per-property abstraction (used for MAXPOOL = 2)
+docs/design.md                                 design, formula revisions (§5), design decisions (§6), status (§7)
+docs/results.md                                verification results, timings, diagnosis of the MAXPOOL = 2 problem
+docs/report.tex                                the report (body only; preamble lives in the group's LaTeX project)
+docs/questions.md                              questions prepared for the tutor meeting of 22 Oct
+docs/ai-usage.md                               AI contribution log
+out/                                           generated files (gitignored; large)
 ```
 
-- A car's position is a level `Nat` in 1–5, where 3 = I. Write helper maps (`level: Loc -> Nat`, `carOf: Loc -> Car` for non-I locations) instead of repeating case logic.
-- A leg must remember its **original request** (`ro`, `rd`) for `done(o, d)` and for unblocking leg 2.
-- Struct field names become global functions: don't reuse them as variable names (`w`, `n`, `o`, `d` are used as variables, so the fields are `wing`, `lvl`, `src`, `dst`).
-- **Pool = sorted, duplicate-free `List(Leg)`**, maintained only through `ins`. Not `FSet`: mCRL2 can't pattern-match on `FSet`, so there's no way to write the recursive functions the pool needs (verified 2026-10-08 on 202607.0). Sorting keeps it canonical: the same pool is always the same state. Stop sets stay `FSet(Nat)`, since they only need `in`.
-- All bounds are named constants in one place (`MAXPOOL`, `ILEVEL`, `TOP`). `MAXPOOL = 5` (the design bound). If state-space generation is too slow, lower it and report that.
-- Never use unbounded data that grows with the run (queues, counters); it makes the state space infinite.
+## 5. The model in brief (details: design.md §2–§3, §6)
 
-**Behaviour**
+- `Loc = struct I | fl(wing: Car, lvl: Nat)`, valid levels 1, 2, 4, 5 (`validLoc`); I is level 3.
+- Pool entry `req(origSrc, origDst, src, dst, st)`, `st ∈ {waiting, active, finished}`: original trip + current leg. Pool = `List(Req)` kept sorted and duplicate-free by `ins` (not `FSet`: no pattern matching on FSet).
+- Cross-wing trip = one entry whose first leg ends at I and which is **rewritten** into its second leg when the first car drops the passenger at I (no `blocked` state; S6 holds by construction).
+- Processes: `Dispatcher(pool)`, `Elevator`/`Go`/`Serve` (cars A and B), `IntersectionManager(mutex)`, `EmergencySwitch(on)`.
+- Synchronisation halves: `_d` dispatcher, `_c` car, `_im` intersection manager, `_em` emergency switch; only the unsuffixed result is in `allow`. `enterI` is three-party (car, IM, switch); `move` and `request` sync with the switch.
+- Cars: LOOK, serve the current level if it has work, wait (no polling) when idle, intersection protocol "hold I exactly when at level 3", idle rule: at I with no work, step one level on and release I.
+- `MAXPOOL` = number of outstanding requests (currently 1 in the spec; the scripts substitute the value).
 
-- Moves are atomic jumps to the **next stop**: `move(e, f1, f2)`. A jump never passes over a level in the stop set (S9).
-- Any move whose range includes level 3 is bracketed by `enterI(e)` … `leaveI(e)` (S1, S2). An idle car must not wait at level 3 (L4).
-- Cars **pull** their stop set: `stops(e, S)` is a synchronisation in which the dispatcher offers `stopsOf(e, pool)` and the car sums over `S`. Sum elimination (`lpssumelm`) removes that sum after linearisation.
-- One `visit(e, n)` updates every affected leg at once; the dispatcher then emits `pickup`, `dropoff` and `done` reports.
-- Leg 2 of a cross-wing trip stays `blocked` until leg 1's `dropoff(_, _, I)`.
+## 6. Verification (details: results.md, design.md §6.11)
 
-**Naming of synchronised actions:** component halves get suffixes and communicate into the name used in requirements, e.g.
-
-```
-comm stops_d | stops_c -> stops,  visit_c | visit_d -> visit,
-     enterI_c | enterI_m -> enterI, leaveI_c | leaveI_m -> leaveI;
-```
-
-The environment is not a separate process: `request`, `emergency` and `reset` are always offered (open system). `emergency` and `reset` synchronise both cars: `emergency_c | emergency_c -> emergency`.
-
-Only actions from the action table in `docs/design.md` may stay visible after `allow`. Requirements are written over exactly those names. Don't hide actions that a requirement mentions.
-
-## 5. Verification pipeline
-
-`scripts/verify.sh` must do this. Check flags with `--help` for the installed version, and record `mcrl22lps --version` in `docs/results.md`.
-
-```bash
-mcrl22lps -v model/touchpoint.mcrl2 out/model.lps
-lpssumelm out/model.lps out/model.lps
-lpsconstelm out/model.lps out/model.lps
-lpsparelm out/model.lps out/model.lps
-lps2lts -v out/model.lps out/model.lts      # prints state/transition counts
-lps2lts -D -t out/model.lps                 # deadlock check with traces
-
-for f in properties/*.mcf properties/sanity/*.mcf; do
-  n=$(basename "$f" .mcf)
-  lps2pbes -c -f "$f" out/model.lps "out/$n.pbes"
-  pbessolve -f out/model.lps --evidence-file="out/$n.evidence.lps" "out/$n.pbes"
-done
-```
-
-A counterexample is in `out/<n>.evidence.lps`. Turn it into an LTS with `lps2lts` and inspect it with `ltsgraph` or `ltsview`.
-
-## 6. Formula patterns
-
-```
-% S1: mutual exclusion on I
-forall e1, e2: Car . val(e1 != e2) =>
-  [true* . enterI(e1) . (!leaveI(e1))* . enterI(e2)] false
-
-% S3: never move with open doors
-forall e: Car .
-  [true* . open(e) . (!close(e))* . exists f1, f2: Nat . move(e, f1, f2)] false
-
-% L1: deadlock freedom
-[true*] <true> true
-
-% L2: every request is served, assuming no new environment input
-forall o, d: Loc . [true* . request(o, d)]
-  mu Y . [!(done(o, d) || exists x, y: Loc . request(x, y) || emergency || reset)] Y
-      && <!(exists x, y: Loc . request(x, y) || emergency || reset)> true
-```
-
-- mCRL2 has **no built-in fairness**. A plain "eventually" fails because the environment can make requests forever. Use the L2 pattern (exclude environment actions) and say so in the report.
-- Data-dependent safety (S9, S10, P1) needs fixpoint parameters, e.g. `nu X(pos: Nat = 1, S: FSet(Nat) = {}) . …` updated on `move` and `stops`.
+- **MAXPOOL = 1** (126,850 states): `verify.ps1` route (state space once, strong-bisimulation reduction, `lts2pbes` + `pbessolve` per property). All S/L true; R1–R9 true except R5 (expected: S9 is vacuous at this bound).
+- **MAXPOOL = 2** (27.3M states, 18.8M after strong reduction): plain checking needs ~30–50 GB. Used **per-property abstraction** (`verify_reduced.ps1`): per group of properties, hide unmentioned actions and minimise modulo branching bisimulation (divergence-preserving for L1, L2, L4), then check; S7, L3, L2 checked per origin (9 instances). Validated at MAXPOOL = 1 and with a mutant.
+- Status 2026-10-25 22:00: all true at MAXPOOL = 2 (S1–S5, S7–S10, L1, L3, L4, R1–R3, R5–R8); L2 running (per origin, expected ~23:10). R4/R9 only at MAXPOOL = 1; S6 by construction.
+- Lessons for formulas: never quantify over an infinite sort at the top of a formula without a bound (`val(validLoc(o) && ...)`, `val(n >= 1 && n <= 5)`) or moving it into the action; keep fixpoint parameters bounded (S7's counter is capped at MAXPOOL).
 
 ## 7. Working rules
 
-1. **Never weaken a formula to make it pass.** If a property fails, save the counterexample, explain the trace in plain words, propose a design fix, and ask before changing the requirement itself.
-2. **Every property gets a sanity check** in `properties/sanity/`: a reachability formula showing the scenario it talks about can actually happen (e.g. `<true* . pickup(B, I, fl(B, 5))> true` for S6). A safety formula over unreachable actions passes trivially.
-3. Safety alone is meaningless (a model that never moves satisfies it). Keep L1–L4 green alongside it.
-4. After every model change, rerun the full pipeline and update `docs/results.md`: state count, transition count, and each property's result per configuration.
-5. Keep state spaces small: 5 levels per car, `MAXPOOL` ≤ 5. If generation takes more than a few minutes, reduce first and report it; don't add tricks silently.
-6. Comment the model per component and per non-obvious guard. The report must let an engineer rebuild the controller exactly from it.
+1. **Never weaken a formula to make it pass.** If a property fails, save the counterexample, explain it, propose a design fix, ask before changing a requirement. Every formula change is recorded in design.md §5 with the original.
+2. Every property gets a sanity check; a safety formula over actions that never happen passes trivially.
+3. After every model change, rerun verification and update results.md and design.md §7.
+4. Comment the model per component and per non-obvious guard.
 
 ## 8. Plan and status
 
-Status: design done (`docs/design.md`). Model draft 1: data types, helpers, actions and component skeletons; process bodies not yet written.
-
-1. **Milestone 1:** same-wing trips only, mutex on I, doors, emergency. Requirements S1–S5, S7–S10, L1–L4 green.
-2. **Milestone 2:** cross-wing trips with blocked/waiting/active legs. Add S6 and recheck everything. Target: running and verified by **16 Oct**.
-3. **Milestone 3 (extension):** bounded transfer area at I. Expect a deadlock, document the counterexample, fix it, re-verify.
-4. **Further extensions, if time allows:** crossing fairness; emergency while a car holds I; approach-zone reservation.
-
-Open design decisions (see `docs/design.md`): opposite-direction pickups, idle position, when a car re-reads its stop set, P1 formulation, and whether the dispatcher and intersection manager need to communicate.
-
-### Known pitfalls (resolve while writing the processes)
-
-- **Polling livelock.** If a car can always re-read `stops(e, S)`, including an empty or unchanged S, there's an infinite path of only `stops` actions. The "inevitably" in L2 and L4 then fails. An idle car must block until there is work, or reads must be tied to progress. This is linked to the "when does a car re-read its stop set" decision.
-- **Emergency vs. L2.** If `request` can happen during an emergency, the L2 pattern (which excludes `reset`) leaves a state where nothing but `reset` can happen: `done` never comes and the `<…> true` conjunct fails. Decide whether requests are refused during an emergency, or whether L2 is stated for paths outside an emergency. Write the choice down in the report.
-- **Merging identical requests.** `ins` merges only identical legs, including their state. A repeated cross-wing request while the first is under way adds a new waiting leg 1 but merges with the existing blocked leg 2. The second passenger can then be stranded at I. Decide what "identical pairs merge" means before writing the dispatcher's `visit` handling.
+- Model: complete (same-wing + cross-wing trips, intersection, done reporting, emergency). Last model change committed in `9fb24a1`.
+- Verification: done at MAXPOOL = 1; MAXPOOL = 2 complete except L2 (running on the laptop). When it finishes: fill in results.md, design.md §7, and the `%%% OPEN` markers in report.tex.
+- Report: skeleton with `%%% GUIDE` / `%%% FIX` / `%%% OPEN` comments in place; the user is writing the prose. Main FIX items: FIFO → LOOK, no `blocked` state, five processes in the figure, pickup/dropoff not modelled, revised S2/S7/L3 formulas, S6 by construction.
+- Dropped: bounded transfer area at I (extension), P1 (LOOK as a formula).

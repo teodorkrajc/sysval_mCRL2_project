@@ -17,10 +17,10 @@ The alternative would be to add `pickup`/`dropoff` report actions (two extra req
 
 ## 2. State space size and which bound to verify
 
-**Context.** `MAXPOOL` bounds the number of outstanding requests. Measured: `MAXPOOL = 1` gives 126,850 states (41 s to generate). `MAXPOOL = 2` is expected to be in the millions: two independent cars, 72 possible requests, an emergency switch and pending completion reports all multiply. The design document originally said 5.
+**Context.** `MAXPOOL` bounds the number of outstanding requests. Measured (see `docs/results.md`): `MAXPOOL = 1` gives 126,850 states (58,880 after strong-bisimulation reduction); all properties verified in 3–99 s each. `MAXPOOL = 2` gives 27.3 million states (18.8 million reduced), 25 min to generate and 26 min to reduce; model checking then ran out of memory (16 GB laptop: `lts2pbes` ran 1.9 h on S1 and ended without a result). The gap: S9 (no skipped stops) is vacuous at `MAXPOOL = 1`, because stop sets never have two levels. The design document originally said 5.
 
 **Questions:**
-- Is verifying with `MAXPOOL = 1` (and `MAXPOOL = 2` for some properties, if feasible) acceptable, if we state and motivate the bound?
+- Is verifying with `MAXPOOL = 1` acceptable, if we state and motivate the bound? Is a targeted `MAXPOOL = 2` check of S9 on a restricted variant (one wing, no emergency) a reasonable way to cover the gap?
 - Which techniques would you recommend for a larger bound? (Generate the LTS once and check formulas against it with `lts2pbes`; LTS reduction modulo bisimulation first; `lpsparunfold`/`lpsrewr`; the `jittyc` rewriter, which may not be available on Windows; other `pbessolve` strategies?)
 
 ## 3. Are our formula revisions sound and acceptable?
