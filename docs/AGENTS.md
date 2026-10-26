@@ -19,7 +19,7 @@ The system: two elevators in two wings (A left, B right), levels 1–5 each, who
 
 ## 3. Working with the user (important)
 
-- **The user writes the report prose themselves.** Never insert report prose into `report.tex`. Your job there: `%%%` comment skeletons (what a section must contain), `%%% FIX:` markers where existing text contradicts the model, and answering questions. Items that depended on the MAXPOOL = 2 run are marked `%%% OPEN (depends on the MAXPOOL = 2 run):`.
+- **The user writes the report prose themselves.** Never insert report prose into `report.tex`. Your job there: `%%%` comment skeletons (what a section must contain), `%%% FIX:` markers where existing text contradicts the model, and answering questions. Items that came from the MAXPOOL = 2 run are marked `%%% RESULT (MAXPOOL = 2 run):`.
 - **The user wants to understand everything.** Explain step by step, give the reasoning behind each construct and decision, show evidence (tool output) rather than assertions, and leave decisions to the user.
 - **State coverage gaps up front, unprompted.** With every bound, abstraction or results table, say what is vacuous or untested (e.g. S9 is vacuous at MAXPOOL = 1).
 - **Long verification runs:** the user prefers to run them in their own terminal or the mCRL2 IDE. Ask before starting anything long; short checks (typecheck, `mcrl2i`, small experiments on scratch copies) are fine.
@@ -56,7 +56,7 @@ out/                                           generated files (gitignored; larg
 
 - **MAXPOOL = 1** (126,850 states): `verify.ps1` route (state space once, strong-bisimulation reduction, `lts2pbes` + `pbessolve` per property). All S/L true; R1–R9 true except R5 (expected: S9 is vacuous at this bound).
 - **MAXPOOL = 2** (27.3M states, 18.8M after strong reduction): plain checking needs ~30–50 GB. Used **per-property abstraction** (`verify_reduced.ps1`): per group of properties, hide unmentioned actions and minimise modulo branching bisimulation (divergence-preserving for L1, L2, L4), then check; S7, L3, L2 checked per origin (9 instances). Validated at MAXPOOL = 1 and with a mutant.
-- Status 2026-10-25 22:00: all true at MAXPOOL = 2 (S1–S5, S7–S10, L1, L3, L4, R1–R3, R5–R8); L2 running (per origin, expected ~23:10). R4/R9 only at MAXPOOL = 1; S6 by construction.
+- **Final (2026-10-25, 23:06): all S/L properties true at MAXPOOL = 2** (S6 by construction); R1–R3, R5–R8 true; R4/R9 only at MAXPOOL = 1. Full table: results.md; log: docs/mp2_reduced_log.txt.
 - Lessons for formulas: never quantify over an infinite sort at the top of a formula without a bound (`val(validLoc(o) && ...)`, `val(n >= 1 && n <= 5)`) or moving it into the action; keep fixpoint parameters bounded (S7's counter is capped at MAXPOOL).
 
 ## 7. Working rules
@@ -69,6 +69,6 @@ out/                                           generated files (gitignored; larg
 ## 8. Plan and status
 
 - Model: complete (same-wing + cross-wing trips, intersection, done reporting, emergency). Last model change committed in `9fb24a1`.
-- Verification: done at MAXPOOL = 1; MAXPOOL = 2 complete except L2 (running on the laptop). When it finishes: fill in results.md, design.md §7, and the `%%% OPEN` markers in report.tex.
+- Verification: complete at MAXPOOL = 1 and MAXPOOL = 2 (all true). results.md, design.md §7 and the former `%%% OPEN` markers in report.tex (now `%%% RESULT`) are filled in.
 - Report: skeleton with `%%% GUIDE` / `%%% FIX` / `%%% OPEN` comments in place; the user is writing the prose. Main FIX items: FIFO → LOOK, no `blocked` state, five processes in the figure, pickup/dropoff not modelled, revised S2/S7/L3 formulas, S6 by construction.
 - Dropped: bounded transfer area at I (extension), P1 (LOOK as a formula).
