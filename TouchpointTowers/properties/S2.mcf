@@ -1,20 +1,10 @@
-% S2: no car moves through or onto/off I without holding the mutex.
-% "Touches I" = the move's range includes level 3 (passing, arriving or leaving).
-% Revised 2026-10-21, original in docs/design.md section 5.
 forall e: Car .
   (
-    % Part 1: before the car's first enterI, it never makes a move that touches I.
-    % (!enterI(e))* = any sequence of steps without enterI(e), from the start.
     [(!enterI(e))* .
       (exists f1, f2: Nat .
         val((f1 <= 3 && 3 <= f2) || (f2 <= 3 && 3 <= f1)) && move(e, f1, f2))] false
     &&
-    % Part 2: after the car releases I (leaveI), it never makes a move that touches I
-    % until it has acquired I again (enterI).
     [true* . leaveI(e) . (!enterI(e))* .
       (exists f1, f2: Nat .
         val((f1 <= 3 && 3 <= f2) || (f2 <= 3 && 3 <= f1)) && move(e, f1, f2))] false
   )
-% Together: every move touching I lies between an enterI(e) and the next leaveI(e).
-% The exists sits INSIDE the action (it matches the move that actually happens),
-% not outside as forall over all Nat pairs, which would never terminate.

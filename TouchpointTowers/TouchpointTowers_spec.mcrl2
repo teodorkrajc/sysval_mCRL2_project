@@ -30,7 +30,7 @@ eqn level(I) = 3;
 	sameWing(x, y) = x == I || y == I || carOf(x) == carOf(y);
 	crossIntersection(n, m) = min(n, m) <= 3 && 3 <= max(n, m);
 	newReq(x, y) = req(x, y, x, if(sameWing(x,y), y, I), waiting); % create cross building requests if needed
-	MAXPOOL = 1; % hardcoded
+	MAXPOOL = 2; % hardcoded
 
 % Dispatcher Functions
 map owner: Req -> Car; % Gives owner (car) of a request
@@ -91,7 +91,6 @@ var n: Nat;
 	S: FSet(Nat);
 
 % conditional equations (c -> lhs = rhs)
-% mention in report why -> an if() would unfold forever while n is still unknown
 eqn n >= 5 -> nextUp(n, S) = 0;
 	n < 5 -> nextUp(n, S) = if(n + 1 in S, n + 1, nextUp(n + 1, S));
 	n <= 1 -> nextDown(n, S) = 0;

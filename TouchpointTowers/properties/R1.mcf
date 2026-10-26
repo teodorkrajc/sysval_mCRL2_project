@@ -1,2 +1,1 @@
-% R1 (sanity for S1, S2, L4): car A actually acquires the intersection.
 <true* . enterI(A)> true

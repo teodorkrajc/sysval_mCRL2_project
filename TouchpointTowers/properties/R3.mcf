@@ -1,2 +1,1 @@
-% R3 (sanity for S2): a car actually crosses I without stopping there (2 -> 4).
 <true* . move(A, 2, 4)> true

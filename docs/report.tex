@@ -1,9 +1,9 @@
 
 \section{Introduction}
 \label{sec:introduction}
-Designers and engineers have a long and complicated relationship. The designer dreams; the engineer has to find out how to make that dream come to life, a challenge ultimately grounded in reality. Touchpoint Towers is a fine (theoretical) example of this. Inspired by Michelangelo's \textit{The Creation of Adam} \ref{fig:creation_of_adam}, a crazy architect designed its two buildings to lean towards each other and meet at a single floor where, unlike in the painting, they actually touch. This means two elevator rails cross at an intersection, presenting a dangerous possibility for crashes that must be dealt with. In this project, we will do the honors. 
+Designers and engineers have a long and complicated relationship. The designer dreams; the engineer has to find out how to make that dream come to life, a challenge ultimately grounded in reality. Touchpoint Towers is a fine (theoretical) example of this. Inspired by Michelangelo's \textit{The Creation of Adam} (Figure~\ref{fig:creation_of_adam}), a crazy architect designed its two buildings to lean towards each other and meet at a single floor where, unlike in the painting, they actually touch. This means two elevator rails cross at an intersection, presenting a dangerous possibility for crashes that must be dealt with. In this project, we will do the honors. 
 
-Elevators are safety-critical, and a controller coordinating two of them is dificult to get right by testing alone: its components act concurrently, and failures tend to hide in rare interleavings that tests seldom reach. Formal methods address this by modelling the controller before it is built and checking its requirements against every possible behaviour of the model. For the course System Validation (2IMF30), we do this with the mCRL2 toolset~\cite{bunte2019mcrl2,groote2014modeling}, which describes a system as communicating processes, expresses requirements in the modal $\mu$-calculus, and is able to check automatically whether the model satisfies them. Our goal is a controller that keeps the intersection safe and serves every passenger, including those that travel between buildings. This presents a substantial modelling challenge: the two elevators compete for the touchpoint, which requires mutual exclusion, yet must cooperate on every trip between buildings.
+Elevators are safety-critical, and a controller coordinating two of them is difficult to get right by testing alone: its components act concurrently, and failures tend to hide in rare interleavings that tests seldom reach. Formal methods address this by modelling the controller before it is built and checking its requirements against every possible behaviour of the model. For the course System Validation (2IMF30), we do this with the mCRL2 toolset~\cite{bunte2019mcrl2,groote2014modeling}, which describes a system as communicating processes, expresses requirements in the modal $\mu$-calculus, and is able to check automatically whether the model satisfies them. Our goal is a controller that keeps the intersection safe and serves every passenger, including those that travel between buildings. This presents a substantial modelling challenge: the two elevators compete for the touchpoint, which requires mutual exclusion, yet must cooperate on every trip between buildings.
 
 In this report, we first describe the system and the abstractions our model makes of it. We then explain what the controller must guarantee and why, and show how each requirement is made precise, from an informal statement to a formula over the observable actions of the model. Next, we present the model itself, together with the decisions we made along the way and the alternatives we considered. Finally, we describe how we verified the model, including what it took to scale verification beyond the smallest configuration, and reflect on the limitations of our results and how the model could be expanded.
 
@@ -44,9 +44,9 @@ Passengers use the system through a terminal at every floor: they enter their de
     \label{fig:architecture}
 \end{figure}
 
-The dispatcher does the bookkeeping. It keeps the pool of outstanding requests, tracks for each whether it is waiting to be picked up or already on board, and tells each elevator which levels it has to visit: hereinafter referred to as its stop set. Note that a request describes a journey, representing one or more passengers making a trip from floor to floor (see ~\ref{sec:assumptions}). When an elevator serves a level, the dispatcher updates the requests concerned, and reports back once a request is completed.
+The dispatcher does the bookkeeping. It keeps the pool of outstanding requests, tracks for each whether it is waiting to be picked up or already on board, and tells each elevator which levels it has to visit: hereinafter referred to as its stop set. Note that a request describes a journey, representing one or more passengers making a trip from floor to floor (see Section~\ref{sec:assumptions}). When an elevator serves a level, the dispatcher updates the requests concerned, and reports back once a request is completed.
 
-The elevators move and serve passengers. Each elevator independently follows the LOOK policy~\cite{silberschatz2012os}: it keeps moving in its current direction while stops remain ahead, and reverses only when none do. The elevators never communicate with each other directly. Instead, they coordinate via the dispatcher and the intersection manager.
+The elevators move and serve passengers. Each elevator independently follows the LOOK policy~\cite{gfg-look}: it keeps moving in its current direction while stops remain ahead, and reverses only when none do. The elevators never communicate with each other directly. Instead, they coordinate via the dispatcher and the intersection manager.
 
 The intersection manager guards Touchpoint I: an elevator needs its permission before entering or passing through I, and at most one elevator holds this permission at a time. Finally, the emergency switch can pause the system: while an emergency is active, no critical actions are allowed until the system is reset. Elevators do not start new movements, access to I is not granted, and no new requests are accepted.
 
@@ -222,6 +222,8 @@ forall e,e2: Car .
 \end{lstlisting}
 The formula prohibits a second elevator from acquiring the intersection while the first still holds it. After \texttt{enterI(e)}, no \texttt{enterI(e2)} with \(e\neq e_2\) may occur before \texttt{leaveI(e)}.
 
+\newpage
+
 \paragraph{S2: Authorized intersection access.}
 \noindent \begin{lstlisting}
 forall e: Car .
@@ -239,7 +241,7 @@ forall e: Car .
         move(e,f1,f2))] false
   )
 \end{lstlisting}
-The first part forbids movement involving level 3 before the elevator initially acquires the intersection, while the second forbids such movement after releasing ownership until the next acquisition. Together, they ensure that every movement entering, leaving, or crossing I occurs with permission. The placement of the existential quantifier is explained in Section~\ref{subsec:formula-revisions}.
+All of entering, leaving or crossing I must lie between an \texttt{enterI(e)} and the next \texttt{leaveI(e)}: the first part covers moves before the first acquisition, the second moves after a release (see Section~\ref{subsec:formula-revisions} for quantifier).
 
 \paragraph{S3: Movement with closed doors.}
 \noindent \begin{lstlisting}
@@ -260,7 +262,7 @@ forall e: Car .
       (exists n: Nat . visit(e,n))] false
   )
 \end{lstlisting}
-The first part prohibits service before the initial door opening, while the second prohibits service after closing until the next opening. Thus, every \texttt{visit(e,n)} must occur while the elevator doors are open.
+The first part prohibits service before the initial door opening, while the second prohibits service after closing until the next opening. Thus, every \texttt{visit(e,n)} must occur while the elevator doors are open. 
 
 \paragraph{S5: Service only at required stops.}
 \noindent \begin{lstlisting}
@@ -358,6 +360,8 @@ The liveness properties concern the ability of the controller to make progress. 
 [true*]<true>true
 \end{lstlisting}
 The formula requires every reachable state to have at least one enabled transition. This excludes deadlocks but does not by itself guarantee progress towards completing outstanding requests.
+
+\newpage
 
 \paragraph{L2: Eventual request completion.}
 \noindent \begin{lstlisting}
@@ -491,11 +495,9 @@ A safety property may hold vacuously when the actions it constrains are never en
 \end{longtable}
 \endgroup
 
-TODO FIX THIS WITH NEW INFO:
+\newpage
 
-An important observation concerns R5. With \texttt{MAXPOOL = 1}, only one request can be outstanding, so a stop set containing two required levels is unreachable. Consequently, R5 evaluates to false, and S9 does not meaningfully exercise the case of skipping one required stop to reach another. With \texttt{MAXPOOL = 2}, R5 becomes true, demonstrating that multi-stop scheduling scenarios are reachable and that S9 can be checked under more representative conditions.
-
-The checks R4 and R9 involve specific actions occurring immediately after one another. Such direct action adjacency is not generally preserved when other actions are hidden during state-space minimization. These checks are therefore evaluated on the unreduced \texttt{MAXPOOL = 1} state space, where both succeed. The complete verification outcomes, including the checks performed at \texttt{MAXPOOL = 2}, are presented in Section~\ref{sec:verification}.
+Two sanity checks need a remark. R5 matters most for S9: with at most one outstanding request, a stop set never contains two levels, so S9 can only be meaningfully tested from \texttt{MAXPOOL = 2} on. R4 and R9 require two actions to occur directly after each other, a property that the abstraction used for the larger bound does not preserve (Section~\ref{subsec:scaling}). The results of all sanity checks are given in Section~\ref{subsec:results}.
 
 \section{Behavioural Specification in mCRL2}
 \label{sec:behavioural-specification}
@@ -503,10 +505,11 @@ The checks R4 and R9 involve specific actions occurring immediately after one an
 %%%   parameters), what it can do in each state (the + branches), and how each action changes the state.
 %%%   Show key snippets; the full spec goes in the appendix. Decisions worth including are listed per subsection.
 
-The controller is specified as five parallel processes: a dispatcher, two elevators, an intersection manager, and an emergency switch. Each process maintains its own state and communicates through synchronized actions. This section describes the data structures, process behaviour, and design decisions underlying the specification. The complete mCRL2 model is provided in Appendix~A.
+The controller is specified as five parallel processes: a dispatcher, two elevators, an intersection manager, and an emergency switch. Each process maintains its own state and communicates through synchronized actions. This section describes the data structures, process behaviour, and design decisions underlying the specification. The complete mCRL2 model is provided in Appendix~\ref{app:spec}.
 
 
 \subsection{Data}
+
 \label{subsec:data}
 %%% - Loc = I | fl(wing, lvl); validLoc needed because Nat is infinite (fl(A,17) is a legal term).
 %%% - Request = req(origSrc, origDst, src, dst, st), st in {waiting, active, finished}: original trip + current leg.
@@ -519,7 +522,7 @@ The controller is specified as five parallel processes: a dispatcher, two elevat
 %%%   linearisation the position is still a variable and the rewriter unfolds the recursion endlessly; a conditional
 %%%   equation only fires once its condition is decidable. Demonstrated with mcrl2i. (Source: docs/questions.md Q7.)
 
-Elevators are identified by the type \texttt{Car}, and passenger locations by \texttt{Loc}: a location is either Touchpoint \texttt{I} or a floor \texttt{fl(w,n)} of wing \texttt{w}. As floor numbers are natural numbers, \texttt{Loc} also contains invalid floors such as \texttt{fl(A,17)}; the predicate \texttt{validLoc} restricts requests to levels 1, 2, 4 and 5 of either wing and I.
+Elevators are identified by the type \texttt{Car}, and passenger locations by \texttt{Loc}: a location is either Touchpoint \texttt{I} or a floor \texttt{fl(w,n)} of wing \texttt{w}. As floor numbers are natural numbers, \texttt{Loc} also contains invalid floors such as \texttt{fl(A,17)}; the predicate \texttt{validLoc} restricts requests to levels 1, 2, 4 and 5 of either wing and I. \\
 
 \begin{lstlisting}
 sort Car = struct A | B;
@@ -612,7 +615,7 @@ An earlier design organized dispatching into sequential phases, such as sending 
 %%%   linearizer cluster them, after which sum elimination could no longer remove `sum S: FSet(Nat)` and state space
 %%%   generation failed ("cannot enumerate FSet(Nat)"). One branch with an inner if-then-else fixed it.
 
-Both elevators use the same parameterized process \texttt{Elevator(e,pos,dir)}, where \texttt{e} identifies the elevator, \texttt{pos} stores its current level, and \texttt{dir} records its travel direction. Elevator behaviour is divided into three processes: \texttt{Elevator} obtains the stop set and selects a destination, \texttt{Go} performs the required movement and intersection synchronization, and \texttt{Serve} handles passenger service. Together, these processes form the elevator's state machine.
+Both elevators use the same parameterized process \texttt{Elevator(e,pos,dir)}, where \texttt{e} identifies the elevator, \texttt{pos} stores its current level, and \texttt{dir} records its travel direction. Elevator behaviour is divided into three processes: \texttt{Elevator} obtains the stop set and selects a destination, \texttt{Go} performs the required movement and intersection synchronization, and \texttt{Serve} handles passenger service.
 
 \begin{lstlisting}
 proc Elevator(e: Car, pos: Nat, dir: Dir) =
@@ -660,6 +663,8 @@ proc Go(e: Car, pos: Nat, dir: Dir, t: Nat) =
 \end{lstlisting}
 
 This protocol ensures that movement involving I is synchronized with the intersection manager, while ordinary movements remain independent of it. During development, this case-based implementation was also compared with an alternative formulation based on separate acquisition and release conditions. Strong bisimulation checking with \texttt{ltscompare} confirmed their behavioural equivalence.
+
+\newpage
 
 \begin{lstlisting}
 proc Serve(e: Car, pos: Nat, dir: Dir) =
@@ -806,140 +811,149 @@ Since \texttt{allow} only admits the fused actions, a half can never occur on it
 
 \section{Verification}
 \label{sec:verification}
-%%% GUIDE: reproducibility first, then results, then what we learned.
+
+We verified the model for two bounds on the request pool: \texttt{MAXPOOL = 1} on its complete state space, and \texttt{MAXPOOL = 2} using a per-property abstraction. All requirements hold at both bounds.
 
 \subsection{Setup and Reproducibility}
 \label{subsec:setup}
-%%% - Toolset: mCRL2 202607.0 (Release). Platform: Windows 11 Enterprise (10.0.26200). Machine: 15.6 GB RAM (fill in the CPU model).
-%%% - Exact commands (PowerShell, from the repository root):
-%%%     mcrl22lps -v TouchpointTowers/TouchpointTowers_spec.mcrl2 out/model.lps
-%%%     lpssumelm -v out/model.lps out/model.lps
-%%%     lpsconstelm -v out/model.lps out/model.lps
-%%%     lpsparelm -v out/model.lps out/model.lps
-%%%     lps2lts -v --threads=4 out/model.lps out/model.lts
-%%%     ltsconvert -v -ebisim out/model.lts out/model_min.lts
-%%%     per property:  lts2pbes -l out/model.lps -f <prop>.mcf out/model_min.lts out/<prop>.pbes
-%%%                    pbessolve out/<prop>.pbes
-%%% - Why this route: generate the state space once, reduce it modulo strong bisimulation (preserves every
-%%%   mu-calculus property), check all formulas against it. Much faster than on-the-fly checking per property
-%%%   in the IDE, which re-evaluates all data functions for every formula.
-%%% - Scripts: scripts/verify.ps1 -MaxPool N runs the pipeline above on a copy of the spec with MAXPOOL = N;
-%%%   scripts/verify_reduced.ps1 runs the per-property abstraction (see Scaling to MAXPOOL = 2). Logs in out/mp<N>/.
-%%% - Reduced route, per group of properties:
-%%%     ltsconvert --tau=<actions the group does not mention> -e(dp)branching-bisim model_min.lts group.lts
-%%%     lts2pbes -l model.lps -f <prop>.mcf group.lts <prop>.pbes ;  pbessolve <prop>.pbes
+
+We used mCRL2 202607.0 (Release) on an HP ZBook Power G9 laptop (Intel Core i7-12700H, 16\,GB RAM, Windows 11 Enterprise 10.0.26200).\footnote{Windows tends to suspend idle laptops during long runs. To keep the system active during the \texttt{MAXPOOL = 2} verification, which took over six hours, an autoclicker played Cookie Clicker in the background.} The state space is generated once, reduced modulo strong bisimulation, which preserves all \(\mu\)-calculus properties, and every property is checked against the result:
+
+\begin{lstlisting}
+mcrl22lps spec.mcrl2 model.lps
+lpssumelm model.lps model.lps
+lpsconstelm model.lps model.lps
+lpsparelm model.lps model.lps
+lps2lts --threads=4 model.lps model.lts
+ltsconvert -ebisim model.lts model_min.lts
+lts2pbes -l model.lps -f S1.mcf model_min.lts S1.pbes
+pbessolve S1.pbes
+\end{lstlisting}
+
+This is much faster than checking in the mCRL2 IDE, which re-evaluates all data functions for every formula (S1: 10\,s instead of 81\,s). The scripts in Appendix~\ref{app:scripts} contain all commands.
 
 \subsection{State Space}
 \label{subsec:state-space}
-%%% - MAXPOOL = 1: 126,850 states, 332,630 transitions, generated in 7.2 s (4 threads);
-%%%   after strong-bisimulation reduction: 58,880 states, 158,208 transitions.
-%%% - MAXPOOL = 2: 27,258,226 states, 84,931,546 transitions, 25.4 min (4 threads); after strong-bisimulation
-%%%   reduction 18,822,336 states, 62,148,384 transitions (26.2 min). About 215x the MAXPOOL = 1 state space.
-%%% - The emergency switch exactly doubles the state space (63,425 without vs 126,850 with, MAXPOOL = 1).
-%%% - Why it grows: two independent cars (positions and phases multiply), 72 possible requests, the emergency switch
-%%%   (every situation exists with and without emergency), finished requests awaiting their done. Pools grow roughly
-%%%   like "choose up to MAXPOOL of all possible entries" (measured for the dispatcher alone in an early version:
-%%%   41 / 811 / 10,291 / 93,986 states for MAXPOOL 1-4).
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+ & States & Transitions & Time\\
+\midrule
+\texttt{MAXPOOL = 1} & 126,850 & 332,630 & 7.2\,s\\
+\quad after strong-bisimulation reduction & 58,880 & 158,208 & \\
+\texttt{MAXPOOL = 2} & 27,258,226 & 84,931,546 & 25.4\,min\\
+\quad after strong-bisimulation reduction & 18,822,336 & 62,148,384 & 26.2\,min\\
+\bottomrule
+\end{tabular}
+\caption{State-space sizes and generation times.}
+\label{tab:state-space}
+\end{table}
+
+Table~\ref{tab:state-space} shows that a second request multiplies the state space by about 215: two pool entries can be combined in about 39,000 ways, independently of the positions and phases of both elevators, and the emergency switch doubles everything.
 
 \subsection{Scaling to MAXPOOL = 2}
 \label{subsec:scaling}
-%%% GUIDE (new subsection): the investigation and its fix. Source: docs/design.md 6.3 and docs/results.md.
-%%% - Problem: the MAXPOOL = 2 state space was generated fine, but checking ran out of memory overnight
-%%%   (lts2pbes 1.9 h on S1 without a result; swapping on S2).
-%%% - Three hypotheses, each tested:
-%%%   (1) model bug / stale data: the linearised process resets unused parameters (stop set, target) to a dummy
-%%%       value; lpsstategraph removes nothing; the 27M states are genuine;
-%%%   (2) infinite unfolding in the formulas: all quantifiers bounded or inside actions, all fixpoint parameters
-%%%       finite; cost 2.5 (S1) to 11.7 (S9) equations per state;
-%%%   (3) checking method: measured at MAXPOOL = 1 and scaled: on-the-fly lps2pbes+pbessolve ~30 GB, lts2pbes route
-%%%       ~50 GB; PBES simplification (pbesconstelm, pbesparelm, pbesstategraph) has no effect.
-%%%   Conclusion: no bug; plain checking needs 2-3x the RAM of a 16 GB laptop.
-%%% - Options weighed, with the guideline 'reduce enough to fit, not maximally': model tweaks (-9% / +2%, rejected);
-%%%   leaving out the emergency for safety properties that do not mention it (sound: the switch only blocks
-%%%   behaviour; halves the state space; not needed); tau-confluence (6x fewer states for S9, single-threaded, slow);
-%%%   per-property abstraction (CHOSEN).
-%%% - Per-property abstraction: per group of properties, hide the actions they do not mention and minimise modulo
-%%%   branching bisimulation (divergence-preserving for L1, L2, L4). Sound because hidden actions are matched exactly
-%%%   like tau, and our formulas are insensitive to inserting/removing internal steps (a * between actions; S7/S10
-%%%   loop on 'any other action'). Hiding fewer actions than needed is still sound, so groups can share a run.
-%%% - Validation at MAXPOOL = 1: identical results; a mutant with the old L4 bug is still caught (L4 = false).
-%%% - Budget: 0.17 GB for checking 59k states, so aim for < ~1M states per checked state space.
-%%% - Second problem: the {request, done, emergency, reset} group reduced to 2.25M states, and S7/L2/L3 range over
-%%%   all 72 trips at once (12.6 GB, swapping). Fix: split the group (S7, L3 without emergency, plain branching)
-%%%   and check per trip (conjunction of 72 instances, ~1/72 of the memory each). Validated at MAXPOOL = 1 (72/72).
-%%% OPEN (depends on the MAXPOOL = 2 run): whether the per-trip runs fit and how long they took; whether any group had to be split further.
+
+\texttt{MAXPOOL = 2} matters because many scenarios need two outstanding requests, such as merging requests, stop sets that change while an elevator is under way, or both elevators being busy at once; at \texttt{MAXPOOL = 1}, S9 is even vacuous (Section~\ref{subsec:sanity-checks}). However, checking the 18.8 million states ran out of memory. We ruled out a modelling error (all states are genuine) and non-terminating formulas, and measured that plain checking would need 30--50\,GB, two to three times the memory of the laptop.
+
+We therefore used a \emph{per-property abstraction} (Figure~\ref{fig:pipeline}). For each group of properties, we hide all actions their formulas do not mention, turning them into internal \(\tau\) steps, minimise modulo branching bisimulation (\texttt{ltsconvert --tau=...\ -ebranching-bisim}), and check the formulas on the result. This preserves every formula that is insensitive to inserting or removing internal steps, which holds for ours, as they always place a \texttt{*} between actions. For L1, L2 and L4, infinite internal loops matter, so their groups use divergence-preserving branching bisimulation. Only R4 and R9, which require two actions directly after each other, are not preserved. We validated the approach at \texttt{MAXPOOL = 1}: all properties give the same results as on the full state space, and a deliberately faulty model, without the emergency gating of \texttt{enterI}, still violates L4.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\textwidth]{Figures/pipeline.pdf}
+    \caption{Verification pipeline: at \texttt{MAXPOOL = 1}, properties are checked on the full state space; at \texttt{MAXPOOL = 2}, on per-group abstractions.}
+    \label{fig:pipeline}
+\end{figure}
+
+S7, L2 and L3 range over all 72 journeys, which made even their abstractions too large to check at once. Since such a formula holds if and only if it holds for the journeys from each origin, we checked it as nine instances, one per origin \(P\). For S7 and L3, \texttt{validLoc(o)} becomes \texttt{o == P}. For L2, only the completion obligation is restricted to requests from \(P\); the outer fixed point must keep following all requests, as restricting it would weaken the formula.
 
 \subsection{Results}
 \label{subsec:results}
-%%% - Table 1, MAXPOOL = 1, full model: all S/L properties true (S6 by construction, not model-checked);
-%%%   R1-R9 true except R5 (expected at this bound). Times 3-99 s each. Source: docs/results.md.
-%%% - Table 2, MAXPOOL = 2, per-property abstraction. Columns: property | group | reduced states | result | time.
-%%%   Known so far: S9, S10, R5 true (group {stops, move, open}, 1,100,116 states);
-%%%                 S1, S2 true (group {enterI, leaveI, move}, 722,572 states).
-%%% OPEN (depends on the MAXPOOL = 2 run): S3, S4, S5, S7, S8, L1, L2, L3, L4, R1-R3, R6-R8, the remaining group sizes, and timings.
-%%% - Coverage table: what each bound actually tests. MAXPOOL = 1: S3, S4, S8 fully; S1, S2, S5, S7, S10, L1-L4
-%%%   partially (no concurrent requests: no stale stop sets, no merging, never two busy cars); S9 vacuous.
-%%%   MAXPOOL = 2 covers the concurrent-request scenarios and makes S9 meaningful.
-%%% OPEN (depends on the MAXPOOL = 2 run): the final coverage statement.
-%%% - Problems found and fixed during development (shows the process): FSet enumeration failure after clustering;
-%%%   non-terminating S2/S7/L3 formulas; the L4 / enterI-during-emergency issue, found by review and later confirmed
-%%%   with a mutant (L4 = false when the gating is removed); MAXPOOL = 2 out of memory (next subsection).
 
-Verification is performed on the mCRL2 model associated with the documented source revision. For each requirement, the final report will provide the exact property file, the result, and reproducibility details (tool version, operating system, commands, and state-space size).
+Table~\ref{tab:results} lists the results; S6 holds by construction (Section~\ref{subsec:cross-wing}). At \texttt{MAXPOOL = 2}, each group was reduced from 18.8 million states to the size shown, which took 3--5.5 minutes per group. Every step fit within 16\,GB.
+
+\begingroup
+\small
+\renewcommand{\arraystretch}{1.1}
+\begin{longtable}{@{}lrrrrr@{}}
+  \caption{Verification results, times in seconds. At \texttt{MAXPOOL = 2}, \emph{States} is the size of the property's abstraction; S7, L2 and L3 are true for all nine origins.}\label{tab:results}\\
+  \toprule
+  & \multicolumn{2}{c}{\texttt{MAXPOOL = 1}} & \multicolumn{3}{c}{\texttt{MAXPOOL = 2}}\\
+  \cmidrule(lr){2-3}\cmidrule(l){4-6}
+  \textbf{Property} & \textbf{Result} & \textbf{Time} & \textbf{States} & \textbf{Result} & \textbf{Time}\\
+  \midrule
+  \endfirsthead
+  \toprule
+  \textbf{Property} & \textbf{Result} & \textbf{Time} & \textbf{States} & \textbf{Result} & \textbf{Time}\\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  S1 & true & 10.1 & 722,572 & true & 112\\
+  S2 & true & 16.8 & 722,572 & true & 191\\
+  S3 & true & 13.4 & 1,966,648 & true & 330\\
+  S4 & true & 19.3 & 1,966,648 & true & 589\\
+  S5 & true & 35.4 & 346,364 & true & 266\\
+  S6 & \multicolumn{5}{c}{by construction, not model-checked}\\
+  S7 & true & 69.0 & 653,308 & true & 4,382\\
+  S8 & true & 9.8 & 1,075,496 & true & 145\\
+  S9 & true\(^{*}\) & 19.4 & 1,100,116 & true & 325\\
+  S10 & true & 10.7 & 1,100,116 & true & 198\\
+  \midrule
+  L1 & true & 3.3 & 1 & true & 49\\
+  L2 & true & 14.6 & 2,254,088 & true & 6,846\\
+  L3 & true & 99.0 & 653,308 & true & 2,424\\
+  L4 & true & 13.3 & 664,224 & true & 131\\
+  \midrule
+  R1 & true & 3.3 & 664,224 & true & 51\\
+  R2 & true & 3.2 & 664,224 & true & 52\\
+  R3 & true & 3.5 & 1,075,496 & true & 67\\
+  R4 & true & 3.9 & -- & true\(^{\dagger}\) & --\\
+  R5 & false & 3.5 & 1,100,116 & true & 77\\
+  R6 & true & 3.4 & 653,308 & true & 78\\
+  R7 & true & 3.6 & 653,308 & true & 78\\
+  R8 & true & 10.2 & 1,075,496 & true & 155\\
+  R9 & true & 4.4 & -- & true\(^{\dagger}\) & --\\
+\end{longtable}
+\endgroup
+\noindent{\footnotesize \(^{*}\)vacuously true, see R5. \\ \(^{\dagger}\)carried over from \texttt{MAXPOOL = 1}, see below.}
+
+The sanity checks show that the properties are not satisfied vacuously, with one expected exception. R5 is false at \texttt{MAXPOOL = 1}, so S9 holds there only because no stop set contains two levels; without R5, we would have reported S9 as verified on this bound alone. At the larger bound, R5 is true and S9 holds meaningfully. R4 and R9 carry over from the smaller bound: since the bound only occurs in the guard \texttt{\#pool < MAXPOOL}, every run at the smaller bound is also a run at the larger one. Larger bounds were not attempted, and the results for the larger bound rely on the abstraction.
 
 \section{Discussion}
 \label{sec:discussion}
-%%% GUIDE: reflect honestly; this is where the design decisions and limitations pay off.
 
 \subsection{Design Decisions}
 \label{subsec:design-decisions}
-%%% - Short recap with pointers back: pool as sorted list; pull-based stop sets with blocking idle cars;
-%%%   always-offered dispatcher branches instead of phases; LOOK serving the current floor; holding I <=> at level 3;
-%%%   idle rule at I; cross-wing option 2; done via a finished state; emergency as a pause via a gating switch.
-%%% - How we worked: restarted the model from scratch with our own design after an AI-generated first draft;
-%%%   built it incrementally (one car -> two cars + intersection -> done + cross-wing -> emergency), testing each
-%%%   data function with mcrl2i before using it in a process.
-%%% - Verification decisions: generate the state space once and check against it; at MAXPOOL = 2 per-property
-%%%   abstraction grouped by alphabet, aiming at 'fits on a 16 GB laptop' (< ~1M states per check) rather than at
-%%%   maximal reduction; model tweaks measured and rejected as not worth it; per-trip checking for the 72-trip formulas.
+
+We built the model in levels of increasing complexity: first the dispatcher with one elevator, then the second elevator with the intersection manager, then cross-wing journeys and completion reporting, and finally the emergency switch. Each data function was tested with \texttt{mcrl2i} before it was used in a process, which exposed problems such as the non-terminating \texttt{if}-based recursion early. Several decisions favored the simplest structure that made a problem impossible rather than a rule that prevents it: e.g. a journey that is rewritten at I cannot start its second leg too early. In the words of Hoare~\cite{hoare1981emperor}, a design can be made ``so simple that there are obviously no deficiencies'' or ``so complicated that there are no obvious deficiencies'', and ``the first method is far more difficult''; we found this to be true.
 
 \subsection{Limitations}
 \label{subsec:limitations}
-%%% - Bound: MAXPOOL = 1 on the full model; MAXPOOL = 2 via per-property abstraction; MAXPOOL >= 3 not attempted.
-%%% OPEN (depends on the MAXPOOL = 2 run): which properties are verified at which bound.
-%%% - The MAXPOOL = 2 results rely on the abstraction being sound for our (stutter-insensitive) formulas and on the
-%%%   tools; validated at MAXPOOL = 1 and with a mutant, not proven by us.
-%%% - R4 and R9 only at MAXPOOL = 1 (minimisation does not preserve 'directly after each other').
-%%% - No passenger identities: done names a trip (L2 weakness for repeated identical requests); S6 not model-checked.
-%%% - Liveness only under the "no further environment input" assumption (no fairness); no fairness between the cars
-%%%   for access to I.
-%%% - Emergency semantics are one interpretation (no door opening because of S10).
-%%% - Schedule quality (waiting time) not addressed; LOOK only.
+
+\begin{itemize}
+  \item \textbf{Bounded verification.} We verified at most two outstanding requests; behaviour that only arises with three or more is not covered.
+  \item \textbf{Abstraction.} The results for \texttt{MAXPOOL = 2} rely on the per-property abstraction preserving our formulas. We argued this and validated it at \texttt{MAXPOOL = 1}, but did not prove it.
+  \item \textbf{Journeys, not passengers.} S6 is argued by construction rather than model-checked, and a single completion may cover several passengers making the same journey.
+  \item \textbf{Liveness assumptions.} L2 and L4 only hold on runs without further requests or emergencies, and there is no fairness between the elevators for access to I. Under continuous traffic, service is possible (L3) but not guaranteed.
+\end{itemize}
 
 \subsection{Future Work}
 \label{subsec:future-work}
-%%% - Bounded transfer area at I (dropped extension): expected deadlock (car at I waiting for space while the other
-%%%   car needs I to empty the area); how one would fix it.
-%%% - pickup/dropoff actions to verify S6; passenger identities.
-%%% - Fairness for access to I.
-%%% - Larger bounds: symbolic tools (lpsreach / pbessolvesymbolic, not in the Windows build used), tau-confluence
-%%%   during generation (tested: 6x fewer states for S9 at MAXPOOL = 1), leaving out the emergency for safety
-%%%   properties, more RAM.
+
+A natural next step is to limit the number of passengers who can wait at I, which we expect to introduce new deadlocks between the two elevators. Modelling individual passengers would allow S6 to be checked directly, and symbolic or reduction techniques could push verification to larger request pools.
 
 \section{Conclusion}
 \label{sec:conclusion}
-%%% GUIDE (new section): what was built, what was verified (and at which bound), the two or three most important
-%%%   lessons. Half a page at most.
-%%% OPEN (depends on the MAXPOOL = 2 run): the sentence on what was verified at which bound.
+
+We designed a controller for Touchpoint Towers in mCRL2, consisting of a dispatcher, two elevators, an intersection manager and an emergency switch, and verified ten safety and four liveness requirements. All model-checked requirements hold for up to two outstanding requests, and the transfer order between wings holds by construction. Three lessons stand out. First, a formula can fail to terminate even on a finite state space if a quantifier or fixed-point parameter ranges over an infinite domain. Second, sanity checks are essential: without one, S9 would have been reported as verified on a bound where it is vacuous. Third, a state space that is too large to check directly can often still be verified per property, by keeping only the actions a formula mentions. The towers' fingers may touch; their elevators, at least, never do.
 
 \section{Declaration of AI Use}
 \label{sec:ai-use}
-%%% GUIDE (new section, REQUIRED by the course): which tool (Claude Code, Claude Opus 5.5), for what (onboarding and
-%%%   explanation of mCRL2 syntax, reviewing the group's model code, testing data functions, diagnosing tool problems,
-%%%   proposing formula revisions, recording design discussions, this report skeleton), and that all model code and
-%%%   report text were understood and written/checked by the group. Source: docs/ai-usage.md (dated log).
-%%%   Also: diagnosing the MAXPOOL = 2 memory problem (measurements, ruled-out hypotheses), proposing and validating
-%%%   per-property abstraction and per-trip checking, writing scripts/verify.ps1 and scripts/verify_reduced.ps1.
+We used Claude Code (Anthropic, Claude Opus 5.5) as a supporting tool throughout the project. The design of the controller and its requirements are our own. Claude helped us understand mCRL2 and its tools, reviewed our work, and suggested improvements and code along the way. Its largest contribution was planning the verification at \texttt{MAXPOOL = 2} under our hardware constraints: it helped diagnose where the memory consumption arose, proposed the per-property abstraction and the per-origin splitting, and prepared the scripts to run them, which we then executed and checked. It also helped draft and edit parts of this report, which we revised in our own words. We reviewed every contribution and understand all parts of the model, the formulas, the tools and this report.
 
 \appendix
 

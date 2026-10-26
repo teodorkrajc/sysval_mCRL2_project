@@ -1,2 +1,1 @@
-% R4 (sanity for S3, S4, S10): doors open and a passenger is served.
 <true* . open(A) . visit(A, 5)> true

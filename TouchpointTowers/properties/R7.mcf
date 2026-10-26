@@ -1,3 +1,1 @@
-% R7 (sanity for S6, L2, L3): a cross-wing request is completed: pickup by A,
-% transfer at I, pickup by B, done.
 <true* . done(fl(A, 1), fl(B, 4))> true

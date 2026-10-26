@@ -1,7 +1,3 @@
-% L3: an outstanding request can always still be completed.
-% Revised 2026-10-21 (validLoc bound added), original in docs/design.md section 5.
 forall o, d: Loc . val(validLoc(o) && validLoc(d)) =>
-  % after request(o, d), as long as no done(o, d) has happened ...
   [true* . request(o, d) . (!done(o, d))*]
-    % ... a path to done(o, d) still exists
     <true* . done(o, d)> true
