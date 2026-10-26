@@ -401,15 +401,15 @@ Every safety property is backed by a reachability check (§4, R1–R9), because 
 - Validated at `MAXPOOL = 1`: S7, L3 and L2 are each true for 72 of 72 trips, matching the single-formula results.
 - *Per trip was too slow; per origin instead.* At `MAXPOOL = 2` each per-trip check took ~2.4 min (1,751 s for the first 12 trips), almost all of it spent loading the 653k-state reduced LTS, so 72 checks per property would have taken ~3 h. Grouping the trips by origin gives 9 instances of 8 trips each: still a conjunction equal to the original formula, ~1/9 of the all-at-once memory, and 8× less loading overhead. Instances: S7, L3: `val(validLoc(o) && validLoc(d))` becomes `val(o == P && validLoc(d))`; L2: `val(!normal)` becomes `val(!normal || !(o == P))`. Validated at `MAXPOOL = 1` (9 of 9 true for each). The fast groups were moved before the request groups so their results come in first.
 
-**Per-origin timings at `MAXPOOL = 2`:** about 8 min per origin for S7 (solving now dominates, not loading).
+**Per-origin timings at `MAXPOOL = 2`:** S7 4,382 s (~8 min per origin), L3 2,424 s, L2 6,846 s (~13 min per origin, on the 2.25M-state reduction). No group needed further splitting; every step stayed within 16 GB. Final table: `docs/results.md`.
 
-## 7. Verification status (2026-10-25, 20:00)
+## 7. Verification status (final, 2026-10-25, 23:06)
 
 Details, timings and commands: `docs/results.md`. Scripts: `scripts/verify.ps1` (full pipeline), `scripts/verify_reduced.ps1` (per-property abstraction).
 
 | Bound | Method | Result |
 | --- | --- | --- |
 | `MAXPOOL = 1` (126,850 states) | full state space | all S/L properties true (S6 by construction); R1–R9 true except R5 (expected) |
-| `MAXPOOL = 2` (27.3M states) | per-property abstraction | true so far: S1, S2, S3, S4, S5, S8, S9, S10, L1, L4, R1, R2, R3, R5, R6, R7, R8. Running: S7, L3, L2 (per origin) |
+| `MAXPOOL = 2` (27.3M states) | per-property abstraction | **all S/L properties true** (S6 by construction; S7, L3, L2 per origin, 9 of 9 each); R1–R3, R5–R8 true. R5 true: S9 is meaningful at this bound |
 
-Not covered at `MAXPOOL = 2`: S6 (by construction, any bound), R4 and R9 (minimisation does not preserve "directly after each other"; true at `MAXPOOL = 1`).
+Not covered at `MAXPOOL = 2` by a direct check: S6 (by construction, any bound), R4 and R9 (minimisation does not preserve "directly after each other"). R4 and R9 still hold at `MAXPOOL = 2` by monotonicity: `MAXPOOL` occurs only in the request guard, so every run at 1 is a run at 2 and the witness paths found at 1 exist at 2. (Conversely, safety at 2 implies safety at 1.) The verified spec copy is identical to the current spec apart from the MAXPOOL value.
